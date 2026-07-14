@@ -21,7 +21,7 @@ import {
   MAP_CX, MAP_CY, LEGEND_FOOTER,
   type LabelDir, type PillOrient, type Station, type Point,
 } from '@/metro/data';
-import { buildGeometry, type Geometry } from '@/metro/geometry';
+import { buildGeometry, offsetPolyline, polylinePathD, type Geometry } from '@/metro/geometry';
 import {
   COMPRESS, buildProfile, distAt, poolSize, currentHeadway,
   istHour, isPeak, SERVICE_START, SERVICE_END, type Profile,
@@ -29,8 +29,10 @@ import {
 
 const APPROACH_DIST = 80;
 const DASH_SPEED = 12;
-/** Left-hand running: trains sit this many px to the left of their travel direction. */
-const TRACK_OFFSET = 5;
+/** Left-hand running: each direction's track (and its trains) sits this many
+    px to the left of the direction of travel. */
+const TRACK_OFFSET = 4;
+const TRACK_WIDTH = 2.5;
 
 /* ---------- Overrides (Station Editor) ---------- */
 
@@ -113,19 +115,30 @@ export default function MetroMap() {
 
   /** Polylines follow overridden station positions: any vertex that
       coincides with a station's base position moves with it. */
-  const geometries = useMemo<Geometry[]>(() => {
-    return lineData.map(ld => {
-      const pts: Point[] = ld.points.map(([px, py]) => {
+  const effectivePts = useMemo<Point[][]>(() => {
+    return lineData.map(ld =>
+      ld.points.map(([px, py]) => {
         const base = ld.stations.find(s => s.x === px && s.y === py);
         if (base) {
           const cur = stations.get(base.id);
           if (cur) return [cur.x, cur.y] as Point;
         }
         return [px, py] as Point;
-      });
-      return buildGeometry(pts, ld.cfg.loop);
-    });
+      })
+    );
   }, [stations]);
+
+  const geometries = useMemo<Geometry[]>(() => {
+    return lineData.map((ld, li) => buildGeometry(effectivePts[li], ld.cfg.loop));
+  }, [effectivePts]);
+
+  /** Double track: one parallel path per direction, offset ±TRACK_OFFSET. */
+  const trackPaths = useMemo<[string, string][]>(() => {
+    return effectivePts.map(pts => [
+      polylinePathD(offsetPolyline(pts, TRACK_OFFSET)),
+      polylinePathD(offsetPolyline(pts, -TRACK_OFFSET)),
+    ]);
+  }, [effectivePts]);
 
   /** Per line: path distance of each of its stations (for ring proximity). */
   const stationDists = useMemo(() => {
@@ -541,18 +554,20 @@ export default function MetroMap() {
             ))}
           </g>
 
-          {/* line glows (night) + tracks + hit areas */}
+          {/* line glows (night) + double tracks + hit areas */}
           {lineData.map((ld, li) => (
             <g key={ld.cfg.id} className={`line-grp${focusedLine >= 0 && focusedLine !== li ? ' dimmed' : ''}`}>
               <path className="line-glow" d={geometries[li].pathD} fill="none"
-                stroke={ld.cfg.color} strokeWidth={ld.cfg.strokeWidth + 8}
+                stroke={ld.cfg.color} strokeWidth={TRACK_OFFSET * 2 + 10}
                 strokeLinecap="round" strokeLinejoin="round" />
-              <path className="line-path" d={geometries[li].pathD} fill="none"
-                stroke={ld.cfg.color} strokeWidth={ld.cfg.strokeWidth}
-                strokeLinecap="round" strokeLinejoin="round"
-                onClick={e => { e.stopPropagation(); setSelectedStation(null); setFocusedLine(li); }} />
+              {trackPaths[li].map((d, ti) => (
+                <path key={ti} className="line-path" d={d} fill="none"
+                  stroke={ld.cfg.color} strokeWidth={TRACK_WIDTH}
+                  strokeLinecap="round" strokeLinejoin="round"
+                  onClick={e => { e.stopPropagation(); setSelectedStation(null); setFocusedLine(li); }} />
+              ))}
               <path className="line-hit" d={geometries[li].pathD} fill="none"
-                stroke="transparent" strokeWidth={20}
+                stroke="transparent" strokeWidth={22}
                 strokeLinecap="round" strokeLinejoin="round"
                 onClick={e => { e.stopPropagation(); setSelectedStation(null); setFocusedLine(li); }} />
             </g>
@@ -606,10 +621,10 @@ export default function MetroMap() {
                       (byLine[dir] ??= [])[slot] = el;
                     }}
                   >
-                    <polygon className="train-headlamp" points="11,-3 50,-10 50,10 11,3" fill="url(#nm-headlamp)" />
-                    <rect className="train-glow" x={-14} y={-7} width={28} height={14} rx={5} fill={ld.cfg.color} />
-                    <rect x={-11} y={-4} width={22} height={8} rx={3.5} fill={ld.cfg.color} opacity={0.85} />
-                    <rect className="train-window" x={-7} y={-1.5} width={14} height={3} rx={1.5} />
+                    <polygon className="train-headlamp" points="10,-2.5 46,-9 46,9 10,2.5" fill="url(#nm-headlamp)" />
+                    <rect className="train-glow" x={-13} y={-6} width={26} height={12} rx={4.5} fill={ld.cfg.color} />
+                    <rect x={-10} y={-3.5} width={20} height={7} rx={3} fill={ld.cfg.color} opacity={0.9} />
+                    <rect className="train-window" x={-6} y={-1.25} width={12} height={2.5} rx={1.25} />
                   </g>
                 ))
               )}

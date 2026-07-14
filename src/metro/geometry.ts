@@ -72,3 +72,45 @@ export function buildGeometry(pts: Point[], isLoop: boolean): Geometry {
 
   return { segs, total, pathD, posAt, distanceOf };
 }
+
+/* ---------- parallel track offsetting ----------
+   Double-track rendering: each direction's track is the centreline
+   offset perpendicular by ±o. Positive o = left of travel (matching
+   left-hand running). Corners are mitered by intersecting the two
+   adjacent offset lines — fine for schematic 45°/90° bends. */
+
+export function offsetPolyline(pts: Point[], o: number): Point[] {
+  if (pts.length < 2) return pts.slice();
+  // Per-segment unit left-normals (screen coords, y down).
+  const normals: Point[] = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const dx = pts[i + 1][0] - pts[i][0], dy = pts[i + 1][1] - pts[i][1];
+    const len = Math.hypot(dx, dy) || 1;
+    normals.push([dy / len, -dx / len]);
+  }
+  const out: Point[] = [];
+  out.push([pts[0][0] + normals[0][0] * o, pts[0][1] + normals[0][1] * o]);
+  for (let i = 1; i < pts.length - 1; i++) {
+    const nA = normals[i - 1], nB = normals[i];
+    const a: Point = [pts[i][0] + nA[0] * o, pts[i][1] + nA[1] * o];
+    const b: Point = [pts[i][0] + nB[0] * o, pts[i][1] + nB[1] * o];
+    const dA: Point = [pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]];
+    const dB: Point = [pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]];
+    const cross = dA[0] * dB[1] - dA[1] * dB[0];
+    if (Math.abs(cross) < 1e-6) {
+      out.push(a); // collinear — no corner
+    } else {
+      // Intersect line (a, dA) with line (b, dB).
+      const t = ((b[0] - a[0]) * dB[1] - (b[1] - a[1]) * dB[0]) / cross;
+      out.push([a[0] + dA[0] * t, a[1] + dA[1] * t]);
+    }
+  }
+  const nZ = normals[normals.length - 1];
+  const last = pts[pts.length - 1];
+  out.push([last[0] + nZ[0] * o, last[1] + nZ[1] * o]);
+  return out;
+}
+
+export function polylinePathD(pts: Point[]): string {
+  return `M ${pts[0].join(',')} ${pts.slice(1).map(p => `L ${p.join(',')}`).join(' ')}`;
+}
