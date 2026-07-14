@@ -26,6 +26,8 @@ export interface LineConfig {
   headwayPeak: number;
   /** real-world seconds between departures off-peak */
   headwayOff: number;
+  /** coaches per trainset (Purple/Green run 6-car, Yellow 3-car) */
+  coaches: number;
 }
 
 export interface StationDef {
@@ -46,9 +48,9 @@ export interface StationDef {
 export type Point = [number, number];
 
 export const LINES: LineConfig[] = [
-  { id: 'purple', name: { en: 'Purple Line', kn: 'ನೇರಳೆ ಮಾರ್ಗ' }, color: '#7B2D8E', strokeWidth: 6, loop: false, headwayPeak: 300, headwayOff: 480 },
-  { id: 'green',  name: { en: 'Green Line',  kn: 'ಹಸಿರು ಮಾರ್ಗ' }, color: '#00A650', strokeWidth: 6, loop: false, headwayPeak: 300, headwayOff: 480 },
-  { id: 'yellow', name: { en: 'Yellow Line', kn: 'ಹಳದಿ ಮಾರ್ಗ' }, color: '#E8B000', strokeWidth: 6, loop: false, headwayPeak: 480, headwayOff: 900 },
+  { id: 'purple', name: { en: 'Purple Line', kn: 'ನೇರಳೆ ಮಾರ್ಗ' }, color: '#7B2D8E', strokeWidth: 6, loop: false, headwayPeak: 300, headwayOff: 480, coaches: 6 },
+  { id: 'green',  name: { en: 'Green Line',  kn: 'ಹಸಿರು ಮಾರ್ಗ' }, color: '#00A650', strokeWidth: 6, loop: false, headwayPeak: 300, headwayOff: 480, coaches: 6 },
+  { id: 'yellow', name: { en: 'Yellow Line', kn: 'ಹಳದಿ ಮಾರ್ಗ' }, color: '#E8B000', strokeWidth: 6, loop: false, headwayPeak: 480, headwayOff: 900, coaches: 3 },
 ];
 
 export const LINE_MAP: Record<string, LineConfig> = Object.fromEntries(LINES.map(l => [l.id, l]));

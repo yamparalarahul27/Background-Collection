@@ -36,6 +36,8 @@ const TRACK_OFFSET = 4;
 const TRACK_WIDTH = 2.5;
 /** Fillet radius for track corners. */
 const CURVE_RADIUS = 18;
+/** Centre-to-centre distance between coaches of a trainset. */
+const COACH_SPACING = 9.7;
 
 /* ---------- Overrides (Station Editor) ---------- */
 
@@ -272,14 +274,22 @@ export default function MetroMap() {
             if (d == null) { el.style.display = 'none'; continue; }
             // Direction B runs the mirrored profile from the far terminus.
             const dist = dir ? geo.total - d : d;
-            const pt = geo.posAt(dist);
-            const heading = dir ? pt.angle + 180 : pt.angle;
-            const rad = heading * Math.PI / 180;
-            const ox = Math.sin(rad) * TRACK_OFFSET;
-            const oy = -Math.cos(rad) * TRACK_OFFSET;
             el.style.display = '';
-            el.setAttribute('transform',
-              `translate(${(pt.x + ox).toFixed(2)},${(pt.y + oy).toFixed(2)}) rotate(${heading.toFixed(2)})`);
+            // Each coach is placed on the path independently, so the
+            // trainset articulates through curves. Coaches trail behind
+            // the head against the direction of travel; posAtExt lets
+            // the tail slide in from beyond the terminus.
+            const coaches = el.children;
+            const trail = dir ? 1 : -1;
+            for (let ci = 0; ci < coaches.length; ci++) {
+              const pt = geo.posAtExt(dist + trail * ci * COACH_SPACING);
+              const heading = dir ? pt.angle + 180 : pt.angle;
+              const rad = heading * Math.PI / 180;
+              const ox = Math.sin(rad) * TRACK_OFFSET;
+              const oy = -Math.cos(rad) * TRACK_OFFSET;
+              (coaches[ci] as SVGGElement).setAttribute('transform',
+                `translate(${(pt.x + ox).toFixed(2)},${(pt.y + oy).toFixed(2)}) rotate(${heading.toFixed(2)})`);
+            }
             active.push(dist);
           }
         }
@@ -658,10 +668,16 @@ export default function MetroMap() {
                       (byLine[dir] ??= [])[slot] = el;
                     }}
                   >
-                    <polygon className="train-headlamp" points="10,-2.5 46,-9 46,9 10,2.5" fill="url(#nm-headlamp)" />
-                    <rect className="train-glow" x={-13} y={-6} width={26} height={12} rx={4.5} fill={ld.cfg.color} />
-                    <rect x={-10} y={-3.5} width={20} height={7} rx={3} fill={ld.cfg.color} opacity={0.9} />
-                    <rect className="train-window" x={-6} y={-1.25} width={12} height={2.5} rx={1.25} />
+                    {Array.from({ length: ld.cfg.coaches }, (_, ci) => (
+                      <g key={ci} className="coach">
+                        {ci === 0 && (
+                          <polygon className="train-headlamp" points="4,-2 38,-8 38,8 4,2" fill="url(#nm-headlamp)" />
+                        )}
+                        <rect className="train-glow" x={-6.5} y={-4.5} width={13} height={9} rx={3.5} fill={ld.cfg.color} />
+                        <rect x={-4} y={-2.75} width={8} height={5.5} rx={2} fill={ld.cfg.color} opacity={0.9} />
+                        <rect className="train-window" x={-2.6} y={-1} width={5.2} height={2} rx={1} />
+                      </g>
+                    ))}
                   </g>
                 ))
               )}
@@ -883,6 +899,7 @@ export default function MetroMap() {
             <path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><polyline points="3 3 3 8 8 8" />
           </svg>
         </button>
+        <a className="tb-3d" href="/bangalore-metro/3d" title="Open 3D view">3D</a>
       </div>
 
       {/* ---------- STATION EDITOR ---------- */}

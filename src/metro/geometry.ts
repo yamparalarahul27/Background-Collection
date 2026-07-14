@@ -24,6 +24,9 @@ export interface Geometry {
   total: number;
   pathD: string;
   posAt(d: number): { x: number; y: number; angle: number };
+  /** Like posAt, but extrapolates past the ends along the terminal segment —
+      lets a multi-coach train slide in/out of a terminus instead of bunching. */
+  posAtExt(d: number): { x: number; y: number; angle: number };
   distanceOf(x: number, y: number): number;
 }
 
@@ -66,11 +69,26 @@ export function buildGeometry(pts: Point[], isLoop: boolean): Geometry {
     return bestDist;
   }
 
+  function posAtExt(d: number) {
+    if (d < 0) {
+      const s = segs[0];
+      const u = s.len > 0 ? d / s.len : 0;
+      return { x: s.ax + u * s.dx, y: s.ay + u * s.dy, angle: s.angle };
+    }
+    if (d > total) {
+      const s = segs[segs.length - 1];
+      const over = d - total;
+      const u = s.len > 0 ? 1 + over / s.len : 1;
+      return { x: s.ax + u * s.dx, y: s.ay + u * s.dy, angle: s.angle };
+    }
+    return posAt(d);
+  }
+
   const pathD = isLoop
     ? `M ${pts[0].join(',')} ${pts.slice(1).map(p => `L ${p.join(',')}`).join(' ')} Z`
     : `M ${pts[0].join(',')} ${pts.slice(1).map(p => `L ${p.join(',')}`).join(' ')}`;
 
-  return { segs, total, pathD, posAt, distanceOf };
+  return { segs, total, pathD, posAt, posAtExt, distanceOf };
 }
 
 /* ---------- parallel track offsetting ----------
