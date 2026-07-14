@@ -1,0 +1,273 @@
+/* ============================================================
+   NAMMA METRO — map styles
+   Day mode is the default; .night on the root flips the canvas
+   to a deep-blue dark theme with warm light accents.
+   ============================================================ */
+
+.metro-root {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: #ffffff;
+  font-family: 'Plus Jakarta Sans', 'Noto Sans Kannada', -apple-system, BlinkMacSystemFont, sans-serif;
+  transition: background 600ms ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.metro-root.night { background: #0a0e1a; }
+
+#nm-map {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+#nm-map:active { cursor: grabbing; }
+
+/* ---------- canvas ---------- */
+.bg-rect { fill: #ffffff; transition: fill 600ms ease; }
+.night .bg-rect { fill: #0a0e1a; }
+.grid-dot { fill: #e0e0e0; transition: fill 600ms ease; }
+.night .grid-dot { fill: #1a1f2e; }
+
+/* ---------- lines ---------- */
+.line-path { cursor: pointer; transition: opacity 400ms cubic-bezier(0.23, 1, 0.32, 1); }
+.line-hit { cursor: pointer; }
+.night .line-path { opacity: 0.45; }
+.line-glow { opacity: 0; pointer-events: none; transition: opacity 600ms ease; }
+.night .line-glow { opacity: 0.06; }
+.line-grp.dimmed .line-path,
+.line-grp.dimmed .line-glow { opacity: 0.1 !important; }
+
+/* ---------- trains ---------- */
+.train-car { pointer-events: none; transition: opacity 500ms cubic-bezier(0.23, 1, 0.32, 1); }
+.train-car.dimmed { opacity: 0.06; }
+.train-glow { opacity: 0.08; transition: opacity 600ms ease; }
+.night .train-glow { opacity: 0.2; }
+.train-window { fill: #ffffff; opacity: 0.45; transition: fill 600ms ease, opacity 600ms ease; }
+.night .train-window { fill: #fff4d6; opacity: 0.85; animation: nmWinFlicker 3s ease-in-out infinite; }
+@keyframes nmWinFlicker { 0%, 100% { opacity: 0.85; } 50% { opacity: 0.95; } }
+.train-headlamp { opacity: 0; transition: opacity 600ms ease; }
+.night .train-headlamp { opacity: 0.35; }
+
+/* ---------- stations ---------- */
+.station-group { cursor: pointer; transition: opacity 400ms cubic-bezier(0.23, 1, 0.32, 1); }
+.station-group.dimmed { opacity: 0.12; }
+.station-mask { fill: #ffffff; transition: fill 600ms ease; }
+.night .station-mask { fill: #0a0e1a; }
+.station-marker { fill: #ffffff; transition: fill 600ms ease, stroke 600ms ease, opacity 600ms ease; }
+.night .station-marker { fill: #0a0e1a; opacity: 0.85; }
+.pill-bg { stroke: #333333; }
+.night .pill-bg { stroke: #888888; }
+.station-group:hover .station-marker { stroke: #222222; }
+.night .station-group:hover .station-marker { stroke: #dddddd; }
+.station-warm { opacity: 0; pointer-events: none; transition: opacity 600ms ease; }
+.night .station-warm { opacity: 0.2; }
+.night .is-xch .station-warm { opacity: 0.12; }
+.station-ambient { opacity: 0; pointer-events: none; transition: opacity 600ms ease; }
+.night .station-ambient { opacity: 0.04; }
+.night .station-ambient.is-xch { opacity: 0.06; }
+
+/* ---------- labels ---------- */
+.station-label { opacity: 0.75; transition: opacity 0.15s ease; pointer-events: none; }
+.is-local .station-label { opacity: 0; }
+.station-group:hover .station-label { opacity: 1; }
+.station-label text {
+  paint-order: stroke;
+  stroke: #ffffff;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  transition: fill 600ms ease, stroke 600ms ease;
+  font-family: 'Plus Jakarta Sans', 'Noto Sans Kannada', sans-serif;
+}
+.night .station-label text { stroke: #0a0e1a; }
+.label-en { font-size: 11px; font-weight: 600; letter-spacing: 0.01em; fill: #444444; stroke-width: 3px; }
+.night .label-en { fill: #c8c4be; }
+.label-kn { font-size: 8.5px; font-weight: 300; fill: #aaaaaa; stroke-width: 2px; font-family: 'Noto Sans Kannada', sans-serif; }
+.night .label-kn { fill: #5a574f; }
+
+/* ---------- shared panel chrome ---------- */
+#nm-legend, #nm-info, #nm-line-info {
+  position: fixed;
+  bottom: 24px;
+  left: 24px;
+  background: rgba(255, 255, 255, 0.93);
+  border: 1px solid #eaeae4;
+  border-radius: 10px;
+  padding: 18px 22px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: background 600ms ease, border-color 600ms ease, box-shadow 600ms ease,
+    opacity 280ms cubic-bezier(0.23, 1, 0.32, 1), transform 280ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.night #nm-legend, .night #nm-info, .night #nm-line-info {
+  background: rgba(10, 14, 26, 0.93);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
+}
+
+/* ---------- legend ---------- */
+#nm-legend { z-index: 10; min-width: 210px; }
+#nm-legend.hidden-panel { opacity: 0; pointer-events: none; }
+.legend-title { font-size: 16px; font-weight: 700; color: #333; line-height: 1; transition: color 600ms ease; }
+.night .legend-title { color: #ddd; }
+.legend-subtitle { font-size: 11px; font-weight: 300; color: #aaa; margin: 3px 0 14px; transition: color 600ms ease; }
+.night .legend-subtitle { color: #777; }
+.legend-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.legend-bar { width: 20px; height: 4px; border-radius: 1.5px; flex-shrink: 0; }
+.legend-name { font-size: 11px; font-weight: 500; color: #666; flex: 1; transition: color 600ms ease; }
+.night .legend-name { color: #aaa; }
+.legend-count { font-size: 11px; font-weight: 600; color: #333; transition: color 600ms ease; }
+.night .legend-count { color: #ddd; }
+.legend-footer { font-size: 10px; color: #bbb; margin-top: 12px; padding-top: 10px; border-top: 1px solid #f0f0f0; transition: color 600ms ease, border-color 600ms ease; }
+.night .legend-footer { color: #555; border-top-color: rgba(255, 255, 255, 0.06); }
+
+/* ---------- station + line info panels ---------- */
+#nm-info { z-index: 12; min-width: 220px; opacity: 0; transform: translateY(8px) scale(0.98); pointer-events: none; }
+#nm-info.visible { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
+#nm-line-info { z-index: 12; min-width: 240px; max-width: 280px; opacity: 0; transform: translateY(8px) scale(0.98); pointer-events: none; }
+#nm-line-info.visible { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
+
+.info-close { position: absolute; top: 10px; right: 12px; background: none; border: none; cursor: pointer; font-size: 14px; color: #ccc; padding: 6px; line-height: 1; }
+.info-close:hover { color: #666; }
+.night .info-close { color: #555; }
+.night .info-close:hover { color: #aaa; }
+
+.station-en { font-size: 17px; font-weight: 700; color: #222; padding-right: 24px; transition: color 600ms ease; }
+.night .station-en { color: #eee; }
+.station-kn { font-size: 13px; font-weight: 300; color: #aaa; margin-top: 2px; font-family: 'Noto Sans Kannada', sans-serif; transition: color 600ms ease; }
+.night .station-kn { color: #777; }
+.line-badges { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+.badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 500; color: #666; background: #f5f4f2; padding: 4px 10px; border-radius: 5px; transition: color 600ms ease, background 600ms ease; }
+.night .badge { background: rgba(255, 255, 255, 0.06); color: #bbb; }
+.badge-sq { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+
+.line-info-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.line-info-bar { width: 28px; height: 6px; border-radius: 3px; flex-shrink: 0; }
+.line-info-en { font-size: 17px; font-weight: 700; color: #222; transition: color 600ms ease; }
+.night .line-info-en { color: #eee; }
+.line-info-kn { font-size: 12px; font-weight: 300; color: #aaa; margin-top: 1px; font-family: 'Noto Sans Kannada', sans-serif; transition: color 600ms ease; }
+.night .line-info-kn { color: #777; }
+.line-info-stats { font-size: 10px; color: #bbb; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #f0f0f0; transition: color 600ms ease, border-color 600ms ease; }
+.night .line-info-stats { color: #666; border-bottom-color: rgba(255, 255, 255, 0.06); }
+
+.station-list { max-height: 320px; overflow-y: auto; padding-right: 4px; }
+.station-list::-webkit-scrollbar { width: 3px; }
+.station-list::-webkit-scrollbar-thumb { background: #ddd; border-radius: 2px; }
+.night .station-list::-webkit-scrollbar-thumb { background: #333; }
+.stn-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; position: relative; opacity: 0; animation: nmStnFadeIn 250ms cubic-bezier(0.23, 1, 0.32, 1) forwards; }
+@keyframes nmStnFadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.stn-dot { width: 8px; height: 8px; border-radius: 1.5px; border: 1.5px solid; flex-shrink: 0; background: #fff; }
+.night .stn-dot { background: #0a0e1a; }
+.stn-connector { position: absolute; left: 3.5px; top: -4px; width: 1.5px; height: calc(100% + 0px); z-index: -1; }
+.stn-name { font-size: 11px; font-weight: 500; color: #555; transition: color 600ms ease; }
+.night .stn-name { color: #bbb; }
+.stn-name-kn { font-size: 9px; font-weight: 300; color: #bbb; font-family: 'Noto Sans Kannada', sans-serif; transition: color 600ms ease; }
+.night .stn-name-kn { color: #666; }
+.stn-xch { font-size: 8px; color: #aaa; font-weight: 400; max-width: 80px; text-align: right; }
+
+/* ---------- toolbar ---------- */
+#nm-toolbar {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  z-index: 10;
+}
+#nm-toolbar button {
+  width: 34px; height: 34px;
+  border: 1px solid #e4e2de;
+  background: #fff;
+  border-radius: 7px;
+  color: #888;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 0;
+  appearance: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  transition: background 120ms cubic-bezier(0.23, 1, 0.32, 1), transform 100ms cubic-bezier(0.23, 1, 0.32, 1),
+    color 120ms, border-color 600ms ease;
+}
+#nm-toolbar button:hover { background: rgba(0, 0, 0, 0.05); color: #555; }
+#nm-toolbar button:active { transform: scale(0.93); }
+.night #nm-toolbar button { background: rgba(10, 14, 26, 0.92); border-color: rgba(255, 255, 255, 0.12); color: #aaa; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); }
+.night #nm-toolbar button:hover { background: rgba(255, 255, 255, 0.06); color: #ddd; }
+
+/* ---------- station editor ---------- */
+#nm-dev-panel {
+  position: fixed;
+  top: 16px; right: 16px;
+  width: 280px;
+  background: rgba(20, 20, 25, 0.95);
+  border: 1px solid #333;
+  border-radius: 10px;
+  padding: 16px;
+  color: #ddd;
+  font-size: 12px;
+  z-index: 100;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+.dp-title { font-size: 13px; font-weight: 700; color: #fff; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; }
+.dp-title span { opacity: 0.4; font-size: 10px; font-weight: 400; }
+.dp-section { margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid #333; }
+.dp-label { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
+.dp-station-name { font-size: 15px; font-weight: 600; color: #fff; }
+.dp-station-kn { font-size: 11px; color: #666; margin-top: 1px; font-family: 'Noto Sans Kannada', sans-serif; }
+.dp-coords { display: flex; gap: 12px; align-items: center; margin-top: 6px; font-size: 11px; color: #888; }
+.dp-coord { font-size: 13px; font-weight: 600; color: #7df; font-variant-numeric: tabular-nums; }
+.dp-arrows { display: grid; grid-template-columns: 32px 32px 32px; grid-template-rows: 32px 32px 32px; gap: 2px; justify-content: center; margin: 8px 0; }
+.dp-arrows button { background: #2a2a30; border: 1px solid #444; border-radius: 5px; color: #ccc; font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background 80ms, transform 80ms; }
+.dp-arrows button:hover { background: #3a3a44; color: #fff; }
+.dp-arrows button:active { transform: scale(0.9); background: #4a4a55; }
+.dp-dot { display: flex; align-items: center; justify-content: center; color: #555; }
+.dp-step { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.dp-step label { font-size: 10px; color: #888; flex-shrink: 0; }
+.dp-step input { width: 50px; background: #2a2a30; border: 1px solid #444; border-radius: 4px; color: #7df; padding: 3px 6px; font-size: 12px; text-align: center; font-family: inherit; }
+.dp-orient { display: flex; gap: 4px; margin-top: 6px; }
+.dp-orient button { flex: 1; padding: 6px; border: 1px solid #444; border-radius: 5px; background: #2a2a30; color: #aaa; font-size: 11px; font-weight: 600; cursor: pointer; transition: all 80ms; }
+.dp-orient button.sel { background: #335; border-color: #57a; color: #7df; }
+.dp-orient button:hover { background: #3a3a44; }
+.dp-name-input { width: 100%; background: #2a2a30; border: 1px solid #444; border-radius: 4px; color: #ddd; padding: 5px 8px; font-size: 12px; margin-bottom: 4px; font-family: inherit; }
+.dp-name-kn { color: #888; font-family: 'Noto Sans Kannada', sans-serif; }
+.dp-changes { font-size: 10px; color: #888; margin: 4px 0 0; }
+.dp-actions { display: flex; gap: 6px; margin-top: 10px; }
+.dp-actions button { flex: 1; padding: 7px; border: none; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer; transition: all 80ms; font-family: inherit; }
+.dp-actions button:active { transform: scale(0.96); }
+.dp-btn-reset { background: #333; color: #aaa; }
+.dp-btn-reset:hover { background: #444; color: #fff; }
+.dp-btn-save { background: #2563eb; color: #fff; }
+.dp-btn-save:hover { background: #3b82f6; }
+.dp-btn-prompt { background: #7c3aed; color: #fff; }
+.dp-btn-prompt:hover { background: #8b5cf6; }
+.dp-msg { text-align: center; margin-top: 6px; font-size: 10px; }
+.dp-msg-save { color: #4ade80; }
+.dp-msg-copy { color: #a78bfa; }
+.dev-selected .station-marker { stroke: #00ff88 !important; stroke-width: 2.5px !important; }
+
+/* ---------- preview mode (iframe embed) ---------- */
+.preview-mode #nm-toolbar,
+.preview-mode #nm-legend,
+.preview-mode #nm-info,
+.preview-mode #nm-line-info,
+.preview-mode #nm-dev-panel {
+  display: none !important;
+}
+.preview-mode #nm-map { pointer-events: none !important; cursor: default; }
+
+/* ---------- small screens ---------- */
+@media (max-width: 640px) {
+  #nm-legend, #nm-info, #nm-line-info { left: 16px; bottom: 76px; padding: 14px 16px; min-width: 180px; }
+  #nm-toolbar { bottom: 20px; }
+  .station-list { max-height: 220px; }
+  #nm-dev-panel { width: calc(100vw - 32px); }
+}

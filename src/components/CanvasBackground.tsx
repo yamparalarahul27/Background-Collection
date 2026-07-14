@@ -140,7 +140,7 @@ export default function CanvasBackground(props: CanvasBackgroundProps) {
                 // (top of screen is y=0, bottom is y=height)
                 // If gradient is to top: y=height is colorFrom, y=0 is colorTo
                 const gradientFactor = 1 - dot.normalizedY;
-                let baseColor = interpolateColor(colorFrom, colorTo, gradientFactor);
+                const baseColor = interpolateColor(colorFrom, colorTo, gradientFactor);
 
                 let r = baseColor.r;
                 let g = baseColor.g;
