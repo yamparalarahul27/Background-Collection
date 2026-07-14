@@ -22,9 +22,10 @@ export interface LineConfig {
   color: string;
   strokeWidth: number;
   loop: boolean;
-  trainCount: number;
-  /** seconds for a train to traverse the full line one way */
-  duration: number;
+  /** real-world seconds between departures during peak hours (IST 8–11, 17–21) */
+  headwayPeak: number;
+  /** real-world seconds between departures off-peak */
+  headwayOff: number;
 }
 
 export interface StationDef {
@@ -43,9 +44,9 @@ export interface StationDef {
 export type Point = [number, number];
 
 export const LINES: LineConfig[] = [
-  { id: 'purple', name: { en: 'Purple Line', kn: 'ನೇರಳೆ ಮಾರ್ಗ' }, color: '#7B2D8E', strokeWidth: 6, loop: false, trainCount: 5, duration: 130 },
-  { id: 'green',  name: { en: 'Green Line',  kn: 'ಹಸಿರು ಮಾರ್ಗ' }, color: '#00A650', strokeWidth: 6, loop: false, trainCount: 4, duration: 100 },
-  { id: 'yellow', name: { en: 'Yellow Line', kn: 'ಹಳದಿ ಮಾರ್ಗ' }, color: '#E8B000', strokeWidth: 6, loop: false, trainCount: 3, duration: 60 },
+  { id: 'purple', name: { en: 'Purple Line', kn: 'ನೇರಳೆ ಮಾರ್ಗ' }, color: '#7B2D8E', strokeWidth: 6, loop: false, headwayPeak: 300, headwayOff: 480 },
+  { id: 'green',  name: { en: 'Green Line',  kn: 'ಹಸಿರು ಮಾರ್ಗ' }, color: '#00A650', strokeWidth: 6, loop: false, headwayPeak: 300, headwayOff: 480 },
+  { id: 'yellow', name: { en: 'Yellow Line', kn: 'ಹಳದಿ ಮಾರ್ಗ' }, color: '#E8B000', strokeWidth: 6, loop: false, headwayPeak: 480, headwayOff: 900 },
 ];
 
 export const LINE_MAP: Record<string, LineConfig> = Object.fromEntries(LINES.map(l => [l.id, l]));

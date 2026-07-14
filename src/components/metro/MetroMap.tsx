@@ -22,9 +22,15 @@ import {
   type LabelDir, type PillOrient, type Station, type Point,
 } from '@/metro/data';
 import { buildGeometry, type Geometry } from '@/metro/geometry';
+import {
+  COMPRESS, buildProfile, distAt, poolSize, currentHeadway,
+  istHour, isPeak, SERVICE_START, SERVICE_END, type Profile,
+} from '@/metro/service';
 
 const APPROACH_DIST = 80;
 const DASH_SPEED = 12;
+/** Left-hand running: trains sit this many px to the left of their travel direction. */
+const TRACK_OFFSET = 5;
 
 /* ---------- Overrides (Station Editor) ---------- */
 
@@ -83,7 +89,6 @@ export default function MetroMap() {
   useEffect(() => {
     // One-time hydration from external systems (localStorage + URL). Done
     // post-mount so server and client render identical initial markup.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setOverrides(loadOverrides());
     setPreview(new URLSearchParams(window.location.search).get('preview') === '1');
   }, []);
@@ -139,44 +144,93 @@ export default function MetroMap() {
       ((s.label === 'left' || s.label === 'right') ? 'V' : 'H');
   }, [overrides]);
 
+  /** Per-line motion profile (dwell + accel/brake between ordered stations). */
+  const profiles = useMemo<Profile[]>(() => {
+    return lineData.map((ld, li) => buildProfile(ld.stations.map(sd => stationDists[li].get(sd.id)!)));
+  }, [stationDists]);
+
+  /** Train elements needed per direction to cover a full trip at peak frequency. */
+  const pools = useMemo(() => lineData.map((ld, li) => poolSize(profiles[li], ld.cfg)), [profiles]);
+
+  // Live clock for the service-status line. Starts null so the statically
+  // prerendered markup never disagrees with the viewer's clock (hydration),
+  // then ticks every 30s.
+  const [svcNow, setSvcNow] = useState<Date | null>(null);
+  useEffect(() => {
+    setSvcNow(new Date());
+    const iv = setInterval(() => setSvcNow(new Date()), 30_000);
+    return () => clearInterval(iv);
+  }, []);
+
   /* ---------- refs for the animation loop ---------- */
 
   const svgRef = useRef<SVGSVGElement>(null);
   const gRef = useRef<SVGGElement>(null);
-  const trainRefs = useRef<(SVGGElement | null)[][]>(lineData.map(ld => new Array(ld.cfg.trainCount).fill(null)));
+  /** [lineIdx][direction][slot] — pooled train elements, reused across departures. */
+  const trainPools = useRef<(SVGGElement | null)[][][]>([]);
   const ringRefs = useRef<Map<string, (SVGRectElement | null)[]>>(new Map());
   const geomRef = useRef(geometries);
   const distsRef = useRef(stationDists);
-  useEffect(() => { geomRef.current = geometries; distsRef.current = stationDists; }, [geometries, stationDists]);
+  const profRef = useRef(profiles);
+  const poolsRef = useRef(pools);
+  useEffect(() => {
+    geomRef.current = geometries;
+    distsRef.current = stationDists;
+    profRef.current = profiles;
+    poolsRef.current = pools;
+  }, [geometries, stationDists, profiles, pools]);
 
   /* ---------- animation ---------- */
 
   useEffect(() => {
     let raf = 0;
-    const trainDists: number[][] = lineData.map(ld => new Array(ld.cfg.trainCount).fill(0));
+    /** Path distances of every train currently on each line (both directions). */
+    const activeDists: number[][] = lineData.map(() => []);
 
-    const frame = (now: number) => {
-      const t = now / 1000;
+    const frame = (rafNow: number) => {
+      const t = rafNow / 1000;
+      // Absolute wall-clock anchors the departure lattice, so every visitor
+      // sees the same service state and reloads don't reshuffle trains.
+      const now = Date.now() / 1000;
+      const wallDate = new Date();
+
       lineData.forEach((ld, li) => {
         const geo = geomRef.current[li];
-        const { total } = geo;
-        const dur = ld.cfg.duration;
-        for (let i = 0; i < ld.cfg.trainCount; i++) {
-          const el = trainRefs.current[li][i];
-          const elapsed = t + i * dur / ld.cfg.trainCount;
-          let dist: number, angleOff = 0;
-          if (ld.cfg.loop) {
-            dist = ((elapsed / dur) * total) % total;
-          } else {
-            const frac = ((elapsed / dur) % 1 + 1) % 1;
-            const travel = frac * 2;
-            if (travel <= 1) dist = travel * total;
-            else { dist = (2 - travel) * total; angleOff = 180; }
+        const profile = profRef.current[li];
+        const pool = poolsRef.current[li];
+        const active = activeDists[li];
+        active.length = 0;
+
+        const headwayReal = currentHeadway(ld.cfg, wallDate);
+        for (let dir = 0; dir < 2; dir++) {
+          const slots = trainPools.current[li]?.[dir] ?? [];
+          if (headwayReal == null) {
+            // Service closed — the network sleeps.
+            for (const el of slots) if (el) el.style.display = 'none';
+            continue;
           }
-          trainDists[li][i] = dist;
-          if (el) {
+          const H = headwayReal / COMPRESS;
+          const phase = dir ? H / 2 : 0; // stagger the two directions
+          const latest = Math.floor((now - phase) / H);
+          for (let k = 0; k < pool; k++) {
+            const n = latest - k; // departure number; slot follows one train for its whole trip
+            const slot = ((n % pool) + pool) % pool;
+            const el = slots[slot];
+            if (!el) continue;
+            const elapsed = now - (n * H + phase);
+            const d = distAt(profile, elapsed);
+            if (d == null) { el.style.display = 'none'; continue; }
+            // Direction B runs the mirrored profile from the far terminus.
+            const dist = dir ? geo.total - d : d;
             const pt = geo.posAt(dist);
-            el.setAttribute('transform', `translate(${pt.x.toFixed(2)},${pt.y.toFixed(2)}) rotate(${(pt.angle + angleOff).toFixed(2)})`);
+            const heading = dir ? pt.angle + 180 : pt.angle;
+            const rad = heading * Math.PI / 180;
+            const ox = Math.sin(rad) * TRACK_OFFSET;
+            const oy = -Math.cos(rad) * TRACK_OFFSET;
+            el.style.display = '';
+            el.setAttribute('transform',
+              `translate(${(pt.x + ox).toFixed(2)},${(pt.y + oy).toFixed(2)}) rotate(${heading.toFixed(2)})`);
+            active.push(dist);
           }
         }
       });
@@ -187,10 +241,8 @@ export default function MetroMap() {
         lineData.forEach((ld, li) => {
           const sd = distsRef.current[li].get(sid);
           if (sd === undefined) return;
-          const total = geomRef.current[li].total;
-          for (let i = 0; i < ld.cfg.trainCount; i++) {
-            let d = Math.abs(sd - trainDists[li][i]);
-            if (ld.cfg.loop && d > total / 2) d = total - d;
+          for (const trainDist of activeDists[li]) {
+            const d = Math.abs(sd - trainDist);
             if (d < APPROACH_DIST) maxP = Math.max(maxP, 1 - d / APPROACH_DIST);
           }
         });
@@ -539,21 +591,28 @@ export default function MetroMap() {
             ));
           })}
 
-          {/* trains */}
+          {/* trains — pooled per line and direction; the schedule loop
+              shows/places them, so they start hidden */}
           {lineData.map((ld, li) => (
             <g key={`trains-${ld.cfg.id}`}>
-              {Array.from({ length: ld.cfg.trainCount }, (_, i) => (
-                <g
-                  key={i}
-                  className={`train-car${focusedLine >= 0 && focusedLine !== li ? ' dimmed' : ''}`}
-                  ref={el => { trainRefs.current[li][i] = el; }}
-                >
-                  <polygon className="train-headlamp" points="11,-3 50,-10 50,10 11,3" fill="url(#nm-headlamp)" />
-                  <rect className="train-glow" x={-14} y={-7} width={28} height={14} rx={5} fill={ld.cfg.color} />
-                  <rect x={-11} y={-4} width={22} height={8} rx={3.5} fill={ld.cfg.color} opacity={0.85} />
-                  <rect className="train-window" x={-7} y={-1.5} width={14} height={3} rx={1.5} />
-                </g>
-              ))}
+              {[0, 1].map(dir =>
+                Array.from({ length: pools[li] }, (_, slot) => (
+                  <g
+                    key={`${dir}-${slot}`}
+                    className={`train-car${focusedLine >= 0 && focusedLine !== li ? ' dimmed' : ''}`}
+                    style={{ display: 'none' }}
+                    ref={el => {
+                      const byLine = (trainPools.current[li] ??= []);
+                      (byLine[dir] ??= [])[slot] = el;
+                    }}
+                  >
+                    <polygon className="train-headlamp" points="11,-3 50,-10 50,10 11,3" fill="url(#nm-headlamp)" />
+                    <rect className="train-glow" x={-14} y={-7} width={28} height={14} rx={5} fill={ld.cfg.color} />
+                    <rect x={-11} y={-4} width={22} height={8} rx={3.5} fill={ld.cfg.color} opacity={0.85} />
+                    <rect className="train-window" x={-7} y={-1.5} width={14} height={3} rx={1.5} />
+                  </g>
+                ))
+              )}
             </g>
           ))}
 
@@ -646,7 +705,22 @@ export default function MetroMap() {
             <span className="legend-count">{ld.stations.length}</span>
           </div>
         ))}
-        <div className="legend-footer">{LEGEND_FOOTER}</div>
+        {svcNow && (() => {
+          const h = istHour(svcNow);
+          const open = h >= SERVICE_START && h < SERVICE_END;
+          return (
+            <div className="legend-service">
+              <span className={`svc-dot ${open ? 'on' : 'off'}`} />
+              {open
+                ? `In service · ${isPeak(h) ? 'peak' : 'off-peak'} frequency`
+                : 'Service ended · resumes 05:00 IST'}
+            </div>
+          );
+        })()}
+        <div className="legend-footer">
+          {LEGEND_FOOTER}
+          <br />Two-way service on the IST clock · time runs {COMPRESS}×
+        </div>
       </div>
 
       {/* ---------- STATION INFO ---------- */}
