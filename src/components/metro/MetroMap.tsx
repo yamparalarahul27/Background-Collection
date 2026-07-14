@@ -29,7 +29,8 @@ import { buildGeometry, offsetPolyline, polylinePathD, roundCorners, type Geomet
 import { TUNNELS } from '@/metro/data';
 import {
   COMPRESS, buildProfile, poolSize, currentHeadway, trainStateAt, returnPhase,
-  BOARD_VIS, istHour, isPeak, SERVICE_START, SERVICE_END, type Profile,
+  BOARD_VIS, istHour, isPeak, autoNight, twilightStrength,
+  SERVICE_START, SERVICE_END, type Profile,
 } from '@/metro/service';
 
 const APPROACH_DIST = 80;
@@ -85,7 +86,8 @@ function roundedRectPerimeter(w: number, h: number, r: number) {
 
 export default function MetroMap() {
   /* ---------- state ---------- */
-  const [night, setNight] = useState(false);
+  /** Theme follows the Bengaluru sky until the user toggles manually. */
+  const [themeMode, setThemeMode] = useState<'auto' | 'day' | 'night'>('auto');
   const [focusedLine, setFocusedLine] = useState(-1);
   const [selectedStation, setSelectedStation] = useState<string | null>(null);
   const [preview, setPreview] = useState(false);
@@ -573,6 +575,10 @@ export default function MetroMap() {
 
   const isInterchange = (s: Station) => s.lines.size > 1;
 
+  const clockH = svcNow ? istHour(svcNow) : null;
+  const night = themeMode === 'auto' ? clockH != null && autoNight(clockH) : themeMode === 'night';
+  const twilight = themeMode === 'auto' && clockH != null ? twilightStrength(clockH) : 0;
+
   const focusedCfg = focusedLine >= 0 ? lineData[focusedLine].cfg : null;
   const selStation = selectedStation ? stations.get(selectedStation) : null;
   const devStationObj = devSelected ? stations.get(devSelected) : null;
@@ -819,6 +825,9 @@ export default function MetroMap() {
         <rect width="100%" height="100%" fill="transparent" style={{ pointerEvents: 'none' }} />
       </svg>
 
+      {/* warm dawn/dusk tint — only while the theme is on auto */}
+      <div className="twilight-overlay" style={{ opacity: twilight * 0.22 }} />
+
       {/* click-away handled on the svg itself */}
       <ClickAway svgRef={svgRef} onClear={clearAll} />
 
@@ -916,7 +925,11 @@ export default function MetroMap() {
 
       {/* ---------- TOOLBAR ---------- */}
       <div id="nm-toolbar">
-        <button title="Toggle day/night" onClick={() => setNight(n => !n)} aria-pressed={night}>
+        <button
+          title={themeMode === 'auto' ? 'Theme follows the Bengaluru sky — click to override' : 'Toggle day/night'}
+          onClick={() => setThemeMode(night ? 'day' : 'night')}
+          aria-pressed={night}
+        >
           {night ? <Sun size={15} weight="bold" /> : <Moon size={15} weight="bold" />}
         </button>
         <button title="Zoom in" onClick={() => zoomBy(1.5)}>

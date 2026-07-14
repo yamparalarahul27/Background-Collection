@@ -10,6 +10,20 @@
 .metro3d-canvas { position: absolute; inset: 0; }
 .metro3d-canvas canvas { display: block; }
 
+.twilight-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+  opacity: 0;
+  background: linear-gradient(to top,
+    rgba(255, 138, 76, 0.6),
+    rgba(255, 170, 110, 0.22) 45%,
+    rgba(255, 195, 145, 0.06) 75%,
+    transparent);
+  transition: opacity 2s ease;
+}
+
 .m3d-pill {
   position: fixed;
   display: inline-flex;

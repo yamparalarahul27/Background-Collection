@@ -108,6 +108,23 @@ export function isPeak(h: number): boolean {
   return (h >= 8 && h < 11) || (h >= 17 && h < 21);
 }
 
+/* ---------- the Bengaluru sky ---------- */
+
+/** True when the map should default to night (sunset ~18:45, sunrise ~6:15 IST). */
+export function autoNight(h: number): boolean {
+  return h < 6.25 || h >= 18.75;
+}
+
+/** 0..1 warm tint strength during the dawn (5:45–6:45) and dusk (18:00–19:00)
+    windows — rises to full mid-window and fades back out. */
+export function twilightStrength(h: number): number {
+  const windows: [number, number][] = [[5.75, 6.75], [18.0, 19.0]];
+  for (const [a, b] of windows) {
+    if (h >= a && h <= b) return Math.sin(((h - a) / (b - a)) * Math.PI);
+  }
+  return 0;
+}
+
 /** Current real-seconds headway for a line, or null when service is closed. */
 export function currentHeadway(cfg: LineConfig, now = new Date()): number | null {
   const h = istHour(now);

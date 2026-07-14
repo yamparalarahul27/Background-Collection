@@ -19,7 +19,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { lineData, buildStationMap, TUNNELS, MAP_CX, MAP_CY, type Point } from '@/metro/data';
 import { buildGeometry, roundCorners, type Geometry } from '@/metro/geometry';
-import { buildProfile, currentHeadway, poolSize, trainStateAt, returnPhase, BOARD_VIS, COMPRESS, istHour, SERVICE_START, SERVICE_END, isPeak, type Profile } from '@/metro/service';
+import { buildProfile, currentHeadway, poolSize, trainStateAt, returnPhase, BOARD_VIS, COMPRESS, istHour, SERVICE_START, SERVICE_END, isPeak, autoNight, twilightStrength, type Profile } from '@/metro/service';
 
 const EL = 16;        // viaduct height
 const UG = -14;       // tunnel depth
@@ -49,20 +49,21 @@ interface LineRuntime {
 
 export default function MetroMap3D() {
   const hostRef = useRef<HTMLDivElement>(null);
-  const [night, setNight] = useState(false);
-  const nightRef = useRef(night);
+  /** Theme follows the Bengaluru sky until the user toggles manually. */
+  const [themeMode, setThemeMode] = useState<'auto' | 'day' | 'night'>('auto');
   const applyThemeRef = useRef<(n: boolean) => void>(() => {});
   const resetViewRef = useRef<() => void>(() => {});
   const [svcNow, setSvcNow] = useState<Date | null>(null);
 
+  const clockH = svcNow ? istHour(svcNow) : null;
+  const night = themeMode === 'auto' ? clockH != null && autoNight(clockH) : themeMode === 'night';
+  const twilight = themeMode === 'auto' && clockH != null ? twilightStrength(clockH) : 0;
+  const nightRef = useRef(night);
+
   useEffect(() => {
-    // Default theme follows the Bengaluru sky. Deferred a tick so the
-    // statically prerendered markup hydrates before theme/clock state lands.
-    const t = setTimeout(() => {
-      const h = istHour();
-      setNight(h < 6.25 || h >= 18.5);
-      setSvcNow(new Date());
-    }, 0);
+    // Live clock, started post-hydration (the prerendered markup must not
+    // depend on the viewer's time).
+    const t = setTimeout(() => setSvcNow(new Date()), 0);
     const iv = setInterval(() => setSvcNow(new Date()), 30_000);
     return () => { clearTimeout(t); clearInterval(iv); };
   }, []);
@@ -413,8 +414,13 @@ export default function MetroMap3D() {
         )}
       </div>
 
+      <div className="twilight-overlay" style={{ opacity: twilight * 0.25 }} />
+
       <div className="m3d-toolbar">
-        <button onClick={() => setNight(v => !v)} title="Toggle day/night">
+        <button
+          onClick={() => setThemeMode(night ? 'day' : 'night')}
+          title={themeMode === 'auto' ? 'Theme follows the Bengaluru sky — click to override' : 'Toggle day/night'}
+        >
           {night ? <Sun size={15} weight="bold" /> : <Moon size={15} weight="bold" />}
         </button>
         <button onClick={() => resetViewRef.current()} title="Reset view">
