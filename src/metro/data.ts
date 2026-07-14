@@ -241,6 +241,72 @@ export const ORIENT_DEFAULTS: Record<string, PillOrient> = {
   'rv-road': 'V',
 };
 
+/* ═══════════════════════════════════════════════════════════
+   LANDMARKS — a toggleable layer of city icons, each tied to
+   its nearest metro station (walk times approximate).
+   ═══════════════════════════════════════════════════════════ */
+
+export interface Landmark {
+  id: string;
+  name: string;
+  kn: string;
+  icon: string; // emoji glyph
+  station: string; // station id
+  walkMin: number;
+  x: number;
+  y: number;
+  label: 'left' | 'right';
+  desc: string;
+}
+
+export const LANDMARKS: Landmark[] = [
+  {
+    id: 'vidhana-soudha-bldg', name: 'Vidhana Soudha', kn: 'ವಿಧಾನ ಸೌಧ', icon: '🏛️',
+    station: 'vidhana-soudha', walkMin: 2, x: 900, y: 625, label: 'right',
+    desc: 'Karnataka\'s seat of legislature — the largest legislative building in India, in Neo-Dravidian granite. Lit up beautifully on Sunday evenings.',
+  },
+  {
+    id: 'cubbon-park-green', name: 'Cubbon Park', kn: 'ಕಬ್ಬನ್ ಉದ್ಯಾನ', icon: '🌳',
+    station: 'cubbon-park', walkMin: 1, x: 1048, y: 622, label: 'right',
+    desc: '300 acres of bamboo groves and rain trees in the heart of the city. The metro station opens straight into the park.',
+  },
+  {
+    id: 'lalbagh-garden', name: 'Lalbagh Botanical Garden', kn: 'ಲಾಲ್‌ಬಾಗ್', icon: '🌷',
+    station: 'lalbagh', walkMin: 4, x: 862, y: 902, label: 'right',
+    desc: 'Commissioned by Hyder Ali in 1760 — the Glass House hosts the famous Republic Day and Independence Day flower shows.',
+  },
+  {
+    id: 'bangalore-palace', name: 'Bangalore Palace', kn: 'ಬೆಂಗಳೂರು ಅರಮನೆ', icon: '🏰',
+    station: 'sampige-road', walkMin: 25, x: 662, y: 585, label: 'left',
+    desc: 'Tudor-revival palace of the Wadiyars, inspired by Windsor Castle. Its grounds host the city\'s biggest concerts.',
+  },
+  {
+    id: 'iskcon-temple', name: 'ISKCON Temple', kn: 'ಇಸ್ಕಾನ್ ದೇವಾಲಯ', icon: '🛕',
+    station: 'mahalakshmi', walkMin: 14, x: 612, y: 480, label: 'left',
+    desc: 'One of the largest ISKCON temples in the world, on Hare Krishna Hill — a blend of glass gopurams and traditional shrines.',
+  },
+  {
+    id: 'chinnaswamy', name: 'M. Chinnaswamy Stadium', kn: 'ಚಿನ್ನಸ್ವಾಮಿ ಕ್ರೀಡಾಂಗಣ', icon: '🏟️',
+    station: 'cubbon-park', walkMin: 7, x: 1122, y: 662, label: 'right',
+    desc: 'Home of Karnataka cricket and RCB. On match nights the whole MG Road corridor glows.',
+  },
+  {
+    id: 'bull-temple', name: 'Bull Temple', kn: 'ದೊಡ್ಡ ಬಸವನ ಗುಡಿ', icon: '🐂',
+    station: 'national-college', walkMin: 12, x: 662, y: 888, label: 'left',
+    desc: 'Basavanagudi\'s 16th-century Nandi, carved from a single granite boulder — one of the largest in the world.',
+  },
+  {
+    id: 'itpl', name: 'ITPL Tech Park', kn: 'ಐಟಿಪಿಎಲ್', icon: '🏢',
+    station: 'whitefield', walkMin: 15, x: 1968, y: 345, label: 'left',
+    desc: 'The campus that put Whitefield on the software map in the 90s — the reason the Purple Line runs this far east.',
+  },
+  {
+    id: 'infosys-ec', name: 'Infosys Campus', kn: 'ಇನ್ಫೋಸಿಸ್', icon: '🏢',
+    station: 'electronic-city', walkMin: 10, x: 1135, y: 1492, label: 'left',
+    desc: 'Electronic City\'s flagship campus. The Yellow Line finally gave its tens of thousands of commuters a way off Hosur Road.',
+  },
+];
+
 /** Map centre used for the initial "reset" framing. */
 export const MAP_CX = 1020;
 export const MAP_CY = 860;

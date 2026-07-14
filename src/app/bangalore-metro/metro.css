@@ -119,6 +119,74 @@
 .label-kn { font-size: 8.5px; font-weight: 300; fill: #aaaaaa; stroke-width: 2px; font-family: 'Noto Sans Kannada', sans-serif; }
 .night .label-kn { fill: #5a574f; }
 
+/* ---------- landmarks ---------- */
+.lm-layer { transition: opacity 350ms cubic-bezier(0.23, 1, 0.32, 1); }
+.lm-layer.lm-hidden { opacity: 0; pointer-events: none; }
+.lm-connector { stroke: #b09a72; stroke-width: 1.2; opacity: 0.4; transition: stroke 600ms ease; }
+.night .lm-connector { stroke: #6b5c3e; }
+.lm-group { cursor: pointer; }
+.lm-mask { fill: #ffffff; transition: fill 600ms ease; }
+.night .lm-mask { fill: #0a0e1a; }
+.lm-marker { fill: #ffffff; stroke: #a8823f; stroke-width: 1.6; transition: fill 600ms ease, stroke 600ms ease; }
+.night .lm-marker { fill: #151b2b; stroke: #8a7448; }
+.lm-group:hover .lm-marker { stroke: #4a3320; }
+.night .lm-group:hover .lm-marker { stroke: #d8c08a; }
+.lm-group.is-selected .lm-marker { stroke-width: 2.4; }
+.lm-icon { pointer-events: none; }
+.lm-label { pointer-events: none; opacity: 0.85; transition: opacity 0.15s ease; }
+.lm-group:hover .lm-label { opacity: 1; }
+.lm-label text {
+  font-family: 'Plus Jakarta Sans', 'Noto Sans Kannada', sans-serif;
+  paint-order: stroke;
+  stroke: #ffffff;
+  stroke-linejoin: round;
+  transition: fill 600ms ease, stroke 600ms ease;
+}
+.night .lm-label text { stroke: #0a0e1a; }
+.lm-name { font-size: 9.5px; font-weight: 600; fill: #7a6233; stroke-width: 2.5px; }
+.night .lm-name { fill: #cdb783; }
+.lm-meta { font-size: 7px; font-weight: 400; fill: #b3a482; stroke-width: 2px; }
+.night .lm-meta { fill: #7c6f52; }
+
+#nm-landmark-info {
+  position: fixed;
+  bottom: 24px;
+  left: 24px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid #eaeae4;
+  border-radius: 10px;
+  padding: 18px 22px;
+  min-width: 250px;
+  max-width: 300px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  z-index: 12;
+  opacity: 0;
+  transform: translateY(8px) scale(0.98);
+  pointer-events: none;
+  transition: background 600ms ease, border-color 600ms ease,
+    opacity 280ms cubic-bezier(0.23, 1, 0.32, 1), transform 280ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+#nm-landmark-info.visible { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
+.night #nm-landmark-info { background: rgba(10, 14, 26, 0.95); border-color: rgba(255, 255, 255, 0.08); }
+.lm-info-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.lm-info-icon { font-size: 22px; }
+.lm-info-name { font-size: 15px; font-weight: 700; color: #222; transition: color 600ms ease; }
+.night .lm-info-name { color: #eee; }
+.lm-info-kn { font-size: 11px; font-weight: 300; color: #aaa; font-family: 'Noto Sans Kannada', sans-serif; transition: color 600ms ease; }
+.night .lm-info-kn { color: #777; }
+.lm-info-station { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: #f8f7f5; border-radius: 7px; transition: background 600ms ease; }
+.night .lm-info-station { background: rgba(255, 255, 255, 0.06); }
+.lm-info-stn-name { font-size: 12px; font-weight: 600; color: #444; transition: color 600ms ease; }
+.night .lm-info-stn-name { color: #ccc; }
+.lm-info-walk { font-size: 10px; color: #aaa; margin-left: auto; }
+.lm-info-desc { font-size: 11px; color: #777; line-height: 1.55; margin-top: 10px; padding-top: 10px; border-top: 1px solid #f0f0f0; transition: color 600ms ease, border-color 600ms ease; }
+.night .lm-info-desc { color: #999; border-top-color: rgba(255, 255, 255, 0.06); }
+
+#nm-toolbar button.tb-active { background: rgba(168, 130, 63, 0.14); color: #a8823f; border-color: rgba(168, 130, 63, 0.4); }
+.night #nm-toolbar button.tb-active { background: rgba(205, 183, 131, 0.12); color: #cdb783; border-color: rgba(205, 183, 131, 0.35); }
+
 /* ---------- shared panel chrome ---------- */
 #nm-legend, #nm-info, #nm-line-info {
   position: fixed;

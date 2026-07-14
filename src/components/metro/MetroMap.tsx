@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowCounterClockwise, ArrowDown, ArrowLeft, ArrowRight, ArrowUp,
-  Cube, Minus, Moon, Plus, Sun, X,
+  Cube, MapPin, Minus, Moon, Plus, Sun, X,
 } from '@phosphor-icons/react';
 import {
   LINE_MAP, lineData, buildStationMap, ORIENT_DEFAULTS,
@@ -26,7 +26,7 @@ import {
   type LabelDir, type PillOrient, type Station, type Point,
 } from '@/metro/data';
 import { buildGeometry, offsetPolyline, polylinePathD, roundCorners, type Geometry } from '@/metro/geometry';
-import { TUNNELS } from '@/metro/data';
+import { TUNNELS, LANDMARKS } from '@/metro/data';
 import {
   COMPRESS, buildProfile, poolSize, currentHeadway, trainStateAt, returnPhase,
   BOARD_VIS, istHour, isPeak, autoNight, twilightStrength,
@@ -91,6 +91,8 @@ export default function MetroMap() {
   const [focusedLine, setFocusedLine] = useState(-1);
   const [selectedStation, setSelectedStation] = useState<string | null>(null);
   const [preview, setPreview] = useState(false);
+  const [landmarksOn, setLandmarksOn] = useState(false);
+  const [selectedLandmark, setSelectedLandmark] = useState<string | null>(null);
 
   const [devMode, setDevMode] = useState(false);
   const [devSelected, setDevSelected] = useState<string | null>(null);
@@ -569,6 +571,7 @@ export default function MetroMap() {
   const clearAll = useCallback(() => {
     setSelectedStation(null);
     setFocusedLine(-1);
+    setSelectedLandmark(null);
   }, []);
 
   /* ---------- render helpers ---------- */
@@ -819,6 +822,36 @@ export default function MetroMap() {
               </g>
             );
           })}
+          {/* landmarks — hidden until toggled from the toolbar */}
+          <g className={`lm-layer${landmarksOn ? '' : ' lm-hidden'}`}>
+            {LANDMARKS.map(lm => {
+              const stn = stations.get(lm.station);
+              if (!stn) return null;
+              const isLeft = lm.label === 'left';
+              return (
+                <g key={lm.id}>
+                  <line className="lm-connector"
+                    x1={stn.x} y1={stn.y} x2={lm.x} y2={lm.y}
+                    strokeDasharray="4 4" />
+                  <g className={`lm-group${selectedLandmark === lm.id ? ' is-selected' : ''}`}
+                    onClick={e => { e.stopPropagation(); clearAll(); setSelectedLandmark(lm.id); }}>
+                    <rect className="lm-mask" x={lm.x - 11} y={lm.y - 11} width={22} height={22} rx={4} />
+                    <rect className="lm-marker" x={lm.x - 8.5} y={lm.y - 8.5} width={17} height={17} rx={3} />
+                    <text className="lm-icon" x={lm.x} y={lm.y + 1} textAnchor="middle" dominantBaseline="central" fontSize={10}>
+                      {lm.icon}
+                    </text>
+                    <rect x={lm.x - 18} y={lm.y - 18} width={36} height={36} fill="transparent" />
+                    <g className="lm-label">
+                      <text className="lm-name" x={lm.x + (isLeft ? -15 : 15)} y={lm.y - 1}
+                        textAnchor={isLeft ? 'end' : 'start'}>{lm.name}</text>
+                      <text className="lm-meta" x={lm.x + (isLeft ? -15 : 15)} y={lm.y + 10}
+                        textAnchor={isLeft ? 'end' : 'start'}>{`~${lm.walkMin} min from ${stn.en}`}</text>
+                    </g>
+                  </g>
+                </g>
+              );
+            })}
+          </g>
         </g>
 
         {/* background click clears focus/selection */}
@@ -831,8 +864,38 @@ export default function MetroMap() {
       {/* click-away handled on the svg itself */}
       <ClickAway svgRef={svgRef} onClear={clearAll} />
 
+      {/* ---------- LANDMARK INFO ---------- */}
+      <div id="nm-landmark-info" className={selectedLandmark ? 'visible' : ''}>
+        <button className="info-close" title="Close" onClick={() => setSelectedLandmark(null)}>
+          <X size={12} weight="bold" />
+        </button>
+        {(() => {
+          const lm = LANDMARKS.find(l => l.id === selectedLandmark);
+          if (!lm) return null;
+          const stn = stations.get(lm.station);
+          const lineColor = stn ? LINE_MAP[[...stn.lines][0]].color : '#888';
+          return (
+            <>
+              <div className="lm-info-header">
+                <span className="lm-info-icon">{lm.icon}</span>
+                <div>
+                  <div className="lm-info-name">{lm.name}</div>
+                  <div className="lm-info-kn">{lm.kn}</div>
+                </div>
+              </div>
+              <div className="lm-info-station">
+                <span className="badge-sq" style={{ background: lineColor }} />
+                <span className="lm-info-stn-name">{stn?.en}</span>
+                <span className="lm-info-walk">~{lm.walkMin} min walk</span>
+              </div>
+              <div className="lm-info-desc">{lm.desc}</div>
+            </>
+          );
+        })()}
+      </div>
+
       {/* ---------- LEGEND ---------- */}
-      <div id="nm-legend" className={selStation || focusedLine >= 0 ? 'hidden-panel' : ''}>
+      <div id="nm-legend" className={selStation || focusedLine >= 0 || selectedLandmark ? 'hidden-panel' : ''}>
         <div className="legend-title">Namma Metro</div>
         <div className="legend-subtitle">ನಮ್ಮ ಮೆಟ್ರೋ · ಬೆಂಗಳೂರು</div>
         {lineData.map(ld => (
@@ -940,6 +1003,14 @@ export default function MetroMap() {
         </button>
         <button title="Reset view" onClick={resetView}>
           <ArrowCounterClockwise size={15} weight="bold" />
+        </button>
+        <button
+          className={landmarksOn ? 'tb-active' : ''}
+          title="Toggle city landmarks"
+          aria-pressed={landmarksOn}
+          onClick={() => { setLandmarksOn(v => !v); if (landmarksOn) setSelectedLandmark(null); }}
+        >
+          <MapPin size={15} weight="bold" />
         </button>
         <a className="tb-3d" href="/bangalore-metro/3d" title="Open 3D view">
           <Cube size={14} weight="bold" />
@@ -1052,7 +1123,7 @@ function ClickAway({ svgRef, onClear }: { svgRef: React.RefObject<SVGSVGElement 
       const moved = Math.hypot(e.clientX - cleared.current.x, e.clientY - cleared.current.y);
       if (moved > 4) return;
       const tgt = e.target as Element;
-      if (tgt.closest('.station-group') || tgt.closest('.line-path') || tgt.closest('.line-hit')) return;
+      if (tgt.closest('.station-group') || tgt.closest('.line-path') || tgt.closest('.line-hit') || tgt.closest('.lm-group')) return;
       onClear();
     };
     svg.addEventListener('pointerdown', down);
