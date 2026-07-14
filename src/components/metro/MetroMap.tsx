@@ -28,8 +28,8 @@ import {
 import { buildGeometry, offsetPolyline, polylinePathD, roundCorners, type Geometry } from '@/metro/geometry';
 import { TUNNELS } from '@/metro/data';
 import {
-  COMPRESS, buildProfile, distAt, poolSize, currentHeadway,
-  istHour, isPeak, SERVICE_START, SERVICE_END, type Profile,
+  COMPRESS, buildProfile, poolSize, currentHeadway, trainStateAt, returnPhase,
+  BOARD_VIS, istHour, isPeak, SERVICE_START, SERVICE_END, type Profile,
 } from '@/metro/service';
 
 const APPROACH_DIST = 80;
@@ -277,19 +277,26 @@ export default function MetroMap() {
             continue;
           }
           const H = headwayReal / COMPRESS;
-          const phase = dir ? H / 2 : 0; // stagger the two directions
-          const latest = Math.floor((now - phase) / H);
+          // Return departures are phased so they pick up right where an
+          // arriving train finishes its crossover — a visible turnaround.
+          const phase = dir ? returnPhase(profile, H) : 0;
+          // Include the next departure too: it is visible boarding early.
+          const latest = Math.floor((now + BOARD_VIS - phase) / H);
           for (let k = 0; k < pool; k++) {
             const n = latest - k; // departure number; slot follows one train for its whole trip
             const slot = ((n % pool) + pool) % pool;
             const el = slots[slot];
             if (!el) continue;
             const elapsed = now - (n * H + phase);
-            const d = distAt(profile, elapsed);
-            if (d == null) { el.style.display = 'none'; continue; }
+            const st = trainStateAt(profile, elapsed);
+            if (!st) { el.style.display = 'none'; continue; }
             // Direction B runs the mirrored profile from the far terminus.
-            const dist = dir ? geo.total - d : d;
+            const dist = dir ? geo.total - st.d : st.d;
             el.style.display = '';
+            el.style.opacity = st.opacity.toFixed(3);
+            // Crossover slides the train from its own track to the
+            // opposite one during the terminus turnaround.
+            const off = TRACK_OFFSET * (1 - 2 * st.crossover);
             // Each coach is placed on the path independently, so the
             // trainset articulates through curves. Coaches trail behind
             // the head against the direction of travel; posAtExt lets
@@ -300,8 +307,8 @@ export default function MetroMap() {
               const pt = geo.posAtExt(dist + trail * ci * COACH_SPACING);
               const heading = dir ? pt.angle + 180 : pt.angle;
               const rad = heading * Math.PI / 180;
-              const ox = Math.sin(rad) * TRACK_OFFSET;
-              const oy = -Math.cos(rad) * TRACK_OFFSET;
+              const ox = Math.sin(rad) * off;
+              const oy = -Math.cos(rad) * off;
               (coaches[ci] as SVGGElement).setAttribute('transform',
                 `translate(${(pt.x + ox).toFixed(2)},${(pt.y + oy).toFixed(2)}) rotate(${heading.toFixed(2)})`);
             }

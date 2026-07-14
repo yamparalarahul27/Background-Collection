@@ -44,7 +44,11 @@ export function buildGeometry(pts: Point[], isLoop: boolean): Geometry {
   }
 
   function posAt(d: number) {
-    d = ((d % total) + total) % total;
+    // Loops wrap; terminal lines clamp — modulo at exactly `total`
+    // would teleport a terminus train back to the line's start.
+    d = isLoop
+      ? ((d % total) + total) % total
+      : Math.max(0, Math.min(d, total - 1e-6));
     for (const s of segs) {
       if (d <= s.len + 0.01) {
         const t = s.len > 0 ? d / s.len : 0;

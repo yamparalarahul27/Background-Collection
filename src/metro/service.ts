@@ -36,6 +36,10 @@ export interface Profile {
   events: ProfileEvent[];
   /** one-way trip duration, visual seconds */
   total: number;
+  /** path distance of the origin terminus */
+  startDist: number;
+  /** path distance of the far terminus */
+  endDist: number;
 }
 
 export function buildProfile(stationDists: number[]): Profile {
@@ -58,7 +62,7 @@ export function buildProfile(stationDists: number[]): Profile {
       t += DWELL;
     }
   }
-  return { events, total: t };
+  return { events, total: t, startDist: dists[0] ?? 0, endDist: dists[dists.length - 1] ?? 0 };
 }
 
 /** Distance along the path at `t` visual seconds after departure; null once the trip is over. */
@@ -111,7 +115,63 @@ export function currentHeadway(cfg: LineConfig, now = new Date()): number | null
   return isPeak(h) ? cfg.headwayPeak : cfg.headwayOff;
 }
 
-/** Trains needed per direction to cover a full trip at peak frequency. */
+/* ---------- terminus turnaround ----------
+   A service is more than its run: the train is visible boarding at
+   the origin before departure, and after arriving it pauses, slides
+   across the crossover to the opposite track, lingers, and fades as
+   the return departure (on the other direction's schedule, phased to
+   line up) fades in at the same spot. Visual seconds. */
+
+export const BOARD_VIS = 1.2;     // sitting at the origin before departure
+export const FADE_VIS = 0.4;      // fade in/out at the seam
+export const TURN_SLIDE = 1.0;    // crossover slide to the opposite track
+export const TURN_LINGER = 0.8;   // settled on the departure track
+
+/** Total extra time a train exists past its arrival. */
+export const TURN_TOTAL = TURN_SLIDE + TURN_LINGER + FADE_VIS;
+
+export interface TrainState {
+  /** distance along the profile (0 = origin terminus) */
+  d: number;
+  /** 0 = on its own track, 1 = fully crossed to the opposite track */
+  crossover: number;
+  opacity: number;
+}
+
+/** Full visual lifecycle of one service at `t` seconds after departure. */
+export function trainStateAt(profile: Profile, t: number): TrainState | null {
+  if (t < -BOARD_VIS || profile.events.length === 0) return null;
+  if (t < 0) {
+    const op = Math.min(1, (t + BOARD_VIS) / FADE_VIS);
+    return { d: profile.startDist, crossover: 0, opacity: op };
+  }
+  if (t <= profile.total) {
+    const d = distAt(profile, t);
+    return d == null ? null : { d, crossover: 0, opacity: 1 };
+  }
+  const over = t - profile.total;
+  if (over <= TURN_SLIDE) {
+    const u = over / TURN_SLIDE;
+    return { d: profile.endDist, crossover: u * u * (3 - 2 * u), opacity: 1 };
+  }
+  if (over <= TURN_SLIDE + TURN_LINGER) {
+    return { d: profile.endDist, crossover: 1, opacity: 1 };
+  }
+  if (over <= TURN_TOTAL) {
+    return { d: profile.endDist, crossover: 1, opacity: 1 - (over - TURN_SLIDE - TURN_LINGER) / FADE_VIS };
+  }
+  return null;
+}
+
+/** Phase (seconds into the headway cycle, visual time) for the opposite
+    direction so its departures line up with arriving trains completing
+    their crossover — the eye reads a continuous turnaround. */
+export function returnPhase(profile: Profile, headwayVis: number): number {
+  const t = profile.total + TURN_SLIDE + TURN_LINGER + BOARD_VIS;
+  return ((t % headwayVis) + headwayVis) % headwayVis;
+}
+
+/** Trains needed per direction to cover boarding + trip + turnaround at peak. */
 export function poolSize(profile: Profile, cfg: LineConfig): number {
-  return Math.ceil(profile.total / (cfg.headwayPeak / COMPRESS)) + 1;
+  return Math.ceil((profile.total + BOARD_VIS + TURN_TOTAL) / (cfg.headwayPeak / COMPRESS)) + 1;
 }

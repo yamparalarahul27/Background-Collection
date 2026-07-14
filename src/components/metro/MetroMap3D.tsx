@@ -19,7 +19,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { lineData, buildStationMap, TUNNELS, MAP_CX, MAP_CY, type Point } from '@/metro/data';
 import { buildGeometry, roundCorners, type Geometry } from '@/metro/geometry';
-import { buildProfile, distAt, currentHeadway, poolSize, COMPRESS, istHour, SERVICE_START, SERVICE_END, isPeak, type Profile } from '@/metro/service';
+import { buildProfile, currentHeadway, poolSize, trainStateAt, returnPhase, BOARD_VIS, COMPRESS, istHour, SERVICE_START, SERVICE_END, isPeak, type Profile } from '@/metro/service';
 
 const EL = 16;        // viaduct height
 const UG = -14;       // tunnel depth
@@ -323,17 +323,19 @@ export default function MetroMap3D() {
           const slots = trainPools[li][dir];
           if (headway == null) { slots.forEach(t => { t.group.visible = false; }); continue; }
           const H = headway / COMPRESS;
-          const phase = dir ? H / 2 : 0;
-          const latest = Math.floor((now - phase) / H);
+          const phase = dir ? returnPhase(L.profile, H) : 0;
+          const latest = Math.floor((now + BOARD_VIS - phase) / H);
           for (let k = 0; k < L.pool; k++) {
             const n = latest - k;
             const slot = ((n % L.pool) + L.pool) % L.pool;
             const t = slots[slot];
             const elapsed = now - (n * H + phase);
-            const d = distAt(L.profile, elapsed);
-            if (d == null) { t.group.visible = false; continue; }
+            const st = trainStateAt(L.profile, elapsed);
+            // 3D has no per-object fade — trains pop at the fade midpoint.
+            if (!st || st.opacity < 0.5) { t.group.visible = false; continue; }
             t.group.visible = true;
-            const dist = dir ? L.geo.total - d : d;
+            const dist = dir ? L.geo.total - st.d : st.d;
+            const off = TRACK_OFFSET * (1 - 2 * st.crossover);
             const trail = dir ? 1 : -1;
             for (let ci = 0; ci < t.coaches.length; ci++) {
               const cd = dist + trail * ci * COACH_SPACING;
@@ -347,7 +349,7 @@ export default function MetroMap3D() {
               const dy = elevAt(li, Math.min(L.geo.total, cdc + 3)) - elevAt(li, Math.max(0, cdc - 3));
               const pitch = -Math.atan2(dy, 6) * (dir ? -1 : 1);
               const c = t.coaches[ci];
-              c.position.set(p.x + nx * TRACK_OFFSET, y, p.y + nz * TRACK_OFFSET);
+              c.position.set(p.x + nx * off, y, p.y + nz * off);
               euler.set(0, -heading, pitch);
               c.setRotationFromEuler(euler);
             }
