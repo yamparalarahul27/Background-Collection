@@ -200,6 +200,17 @@ export default function MetroMap() {
       ((s.label === 'left' || s.label === 'right') ? 'V' : 'H');
   }, [overrides]);
 
+  /** Terminus stations (first/last of each line) get solid line-colored caps. */
+  const terminusColors = useMemo(() => {
+    const m = new Map<string, string>();
+    lineData.forEach(ld => {
+      [ld.stations[0], ld.stations[ld.stations.length - 1]].forEach(sd => {
+        m.set(sd.id, ld.cfg.color);
+      });
+    });
+    return m;
+  }, []);
+
   /** Per-line motion profile (dwell + accel/brake between ordered stations). */
   const profiles = useMemo<Profile[]>(() => {
     return lineData.map((ld, li) => buildProfile(ld.stations.map(sd => stationDists[li].get(sd.id)!)));
@@ -617,6 +628,18 @@ export default function MetroMap() {
                   strokeLinecap="round" strokeLinejoin="round"
                   onClick={e => { e.stopPropagation(); setSelectedStation(null); setFocusedLine(li); }} />
               ))}
+              {/* buffer-stop bars across the corridor at both ends */}
+              {[0.01, geometries[li].total - 0.01].map((d, ei) => {
+                const p = geometries[li].posAt(d);
+                const rad = p.angle * Math.PI / 180;
+                const nx = Math.sin(rad), ny = -Math.cos(rad);
+                return (
+                  <line key={`cap-${ei}`} className="end-cap"
+                    x1={p.x + nx * 8} y1={p.y + ny * 8}
+                    x2={p.x - nx * 8} y2={p.y - ny * 8}
+                    stroke={ld.cfg.color} strokeWidth={3} strokeLinecap="round" />
+                );
+              })}
               <path className="line-hit" d={geometries[li].pathD} fill="none"
                 stroke="transparent" strokeWidth={22}
                 strokeLinecap="round" strokeLinejoin="round"
@@ -709,6 +732,7 @@ export default function MetroMap() {
             const colors = [...s.lines].map(lid => LINE_MAP[lid].color);
             const dimmed = focusedCfg ? !s.lines.has(focusedCfg.id) : false;
             const isLocal = !!s.local && !ic;
+            const terminusColor = !ic ? terminusColors.get(s.id) : undefined;
             const off = labelOffsets(s.label);
             const enLines = s.enLines ?? [s.en];
             const knYExtra = (enLines.length - 1) * 13;
@@ -721,6 +745,7 @@ export default function MetroMap() {
                   'station-group',
                   ic ? 'is-xch' : '',
                   isLocal ? 'is-local' : '',
+                  terminusColor ? 'is-terminus' : '',
                   dimmed ? 'dimmed' : '',
                   devSel ? 'dev-selected' : '',
                 ].filter(Boolean).join(' ')}
@@ -751,10 +776,17 @@ export default function MetroMap() {
                   );
                 })() : (
                   <>
-                    <rect className="station-mask" x={s.x - 7} y={s.y - 7} width={14} height={14} rx={1.5} />
-                    <rect className="station-marker" x={s.x - 5} y={s.y - 5} width={10} height={10} rx={0.8}
-                      stroke={colors[0]} strokeWidth={1.5}
-                      strokeDasharray={s.underground ? '2.4 1.7' : undefined} />
+                    <rect className="station-mask" x={s.x - 7 - (terminusColor ? 1 : 0)} y={s.y - 7 - (terminusColor ? 1 : 0)}
+                      width={terminusColor ? 16 : 14} height={terminusColor ? 16 : 14} rx={1.5} />
+                    {terminusColor ? (
+                      // Solid line-colored block — the line ends here.
+                      <rect className="station-marker" x={s.x - 6} y={s.y - 6} width={12} height={12} rx={1.2}
+                        stroke="#FFFFFF" strokeWidth={1.5} style={{ fill: terminusColor }} />
+                    ) : (
+                      <rect className="station-marker" x={s.x - 5} y={s.y - 5} width={10} height={10} rx={0.8}
+                        stroke={colors[0]} strokeWidth={1.5}
+                        strokeDasharray={s.underground ? '2.4 1.7' : undefined} />
+                    )}
                     <rect className="station-warm" x={s.x - 3.5} y={s.y - 3.5} width={7} height={7} rx={0.5} fill="#FFEEBB" />
                   </>
                 )}

@@ -76,6 +76,14 @@
 .night .station-ambient { opacity: 0.04; }
 .night .station-ambient.is-xch { opacity: 0.06; }
 
+/* ---------- terminus caps ---------- */
+.end-cap { pointer-events: none; transition: opacity 400ms cubic-bezier(0.23, 1, 0.32, 1); }
+.night .end-cap { opacity: 0.7; }
+/* terminus markers keep their line-color fill in night mode (inline style wins),
+   but the white ring flips to the canvas color */
+.night .is-terminus .station-marker { stroke: #0a0e1a; opacity: 1; }
+.is-terminus .label-en { font-weight: 800; }
+
 /* ---------- labels ---------- */
 .station-label { opacity: 0.75; transition: opacity 0.15s ease; pointer-events: none; }
 .is-local .station-label { opacity: 0; }
