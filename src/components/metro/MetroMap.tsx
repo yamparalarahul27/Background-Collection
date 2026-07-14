@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowCounterClockwise, ArrowDown, ArrowLeft, ArrowRight, ArrowUp,
-  Cube, MapPin, Minus, Moon, Plus, Sun, X,
+  Cube, MapPin, Minus, Moon, Plus, SpeakerSimpleHigh, SpeakerSimpleSlash, Sun, X,
 } from '@phosphor-icons/react';
 import {
   LINE_MAP, lineData, buildStationMap, ORIENT_DEFAULTS,
@@ -29,7 +29,7 @@ import { buildGeometry, offsetPolyline, polylinePathD, roundCorners, type Geomet
 import { TUNNELS, LANDMARKS } from '@/metro/data';
 import {
   COMPRESS, buildProfile, poolSize, currentHeadway, trainStateAt, returnPhase,
-  BOARD_VIS, istHour, isPeak, autoNight, twilightStrength,
+  BOARD_VIS, istHour, isPeak, autoNight, twilightStrength, isDwelling,
   SERVICE_START, SERVICE_END, type Profile,
 } from '@/metro/service';
 
@@ -93,6 +93,7 @@ export default function MetroMap() {
   const [preview, setPreview] = useState(false);
   const [landmarksOn, setLandmarksOn] = useState(false);
   const [selectedLandmark, setSelectedLandmark] = useState<string | null>(null);
+  const [soundOn, setSoundOn] = useState(false);
 
   const [devMode, setDevMode] = useState(false);
   const [devSelected, setDevSelected] = useState<string | null>(null);
@@ -251,6 +252,60 @@ export default function MetroMap() {
     poolsRef.current = pools;
   }, [geometries, stationDists, profiles, pools]);
 
+  /* ---------- station chime (off by default) ---------- */
+
+  const audioRef = useRef<AudioContext | null>(null);
+  const soundOnRef = useRef(false);
+  const lastChimeRef = useRef(0);
+  const dwellMapRef = useRef(new Map<string, boolean>());
+  useEffect(() => { soundOnRef.current = soundOn; }, [soundOn]);
+
+  const toggleSound = useCallback(() => {
+    setSoundOn(v => {
+      const next = !v;
+      if (next && !audioRef.current) {
+        try {
+          audioRef.current = new AudioContext();
+        } catch { return false; }
+      }
+      if (next) audioRef.current?.resume();
+      return next;
+    });
+  }, []);
+
+  /** Soft two-tone arrival chime, throttled by the caller. */
+  const playChime = useCallback(() => {
+    const ctx = audioRef.current;
+    if (!ctx || ctx.state !== 'running') return;
+    const t0 = ctx.currentTime;
+    [[659.25, 0], [523.25, 0.22]].forEach(([freq, dt]) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0, t0 + dt);
+      gain.gain.linearRampToValueAtTime(0.045, t0 + dt + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dt + 0.3);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t0 + dt);
+      osc.stop(t0 + dt + 0.32);
+    });
+  }, []);
+
+  /** Chime only for arrivals the viewer can see, while zoomed in enough
+      to be "at" a station — and never more than one every couple seconds. */
+  const maybeChime = useCallback((mapX: number, mapY: number) => {
+    if (!soundOnRef.current) return;
+    const nowMs = performance.now();
+    if (nowMs - lastChimeRef.current < 2200) return;
+    const { x, y, k } = tfRef.current;
+    if (k < 0.9) return;
+    const sx = mapX * k + x, sy = mapY * k + y;
+    if (sx < 0 || sy < 0 || sx > window.innerWidth || sy > window.innerHeight) return;
+    lastChimeRef.current = nowMs;
+    playChime();
+  }, [playChime]);
+
   /* ---------- animation ---------- */
 
   useEffect(() => {
@@ -298,6 +353,15 @@ export default function MetroMap() {
             const dist = dir ? geo.total - st.d : st.d;
             el.style.display = '';
             el.style.opacity = st.opacity.toFixed(3);
+            // Arrival edge → maybe chime (checked against zoom + viewport).
+            const dwellKey = `${li}:${dir}:${n}`;
+            const dwellNow = isDwelling(profile, elapsed);
+            let justStopped = false;
+            if (dwellNow !== (dwellMapRef.current.get(dwellKey) ?? false)) {
+              if (dwellMapRef.current.size > 600) dwellMapRef.current.clear();
+              dwellMapRef.current.set(dwellKey, dwellNow);
+              justStopped = dwellNow;
+            }
             // Crossover slides the train from its own track to the
             // opposite one during the terminus turnaround.
             const off = TRACK_OFFSET * (1 - 2 * st.crossover);
@@ -315,6 +379,7 @@ export default function MetroMap() {
               const oy = -Math.cos(rad) * off;
               (coaches[ci] as SVGGElement).setAttribute('transform',
                 `translate(${(pt.x + ox).toFixed(2)},${(pt.y + oy).toFixed(2)}) rotate(${heading.toFixed(2)})`);
+              if (ci === 0 && justStopped) maybeChime(pt.x + ox, pt.y + oy);
             }
             active.push(dist);
           }
@@ -347,7 +412,7 @@ export default function MetroMap() {
     };
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
-  }, []);
+  }, [maybeChime]);
 
   /* ---------- pan / zoom ---------- */
 
@@ -1011,6 +1076,14 @@ export default function MetroMap() {
           onClick={() => { setLandmarksOn(v => !v); if (landmarksOn) setSelectedLandmark(null); }}
         >
           <MapPin size={15} weight="bold" />
+        </button>
+        <button
+          className={soundOn ? 'tb-active' : ''}
+          title={soundOn ? 'Mute station chimes' : 'Station chimes — plays when a train stops at a station in view (zoom in)'}
+          aria-pressed={soundOn}
+          onClick={toggleSound}
+        >
+          {soundOn ? <SpeakerSimpleHigh size={15} weight="bold" /> : <SpeakerSimpleSlash size={15} weight="bold" />}
         </button>
         <a className="tb-3d" href="/bangalore-metro/3d" title="Open 3D view">
           <Cube size={14} weight="bold" />

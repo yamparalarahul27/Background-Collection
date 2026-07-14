@@ -155,6 +155,18 @@ export interface TrainState {
   opacity: number;
 }
 
+/** True while the service is stopped at an intermediate station. */
+export function isDwelling(profile: Profile, t: number): boolean {
+  if (t <= 0 || t >= profile.total || profile.events.length === 0) return false;
+  const evs = profile.events;
+  let lo = 0, hi = evs.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (evs[mid].t1 < t) lo = mid + 1; else hi = mid;
+  }
+  return evs[lo].type === 'dwell';
+}
+
 /** Full visual lifecycle of one service at `t` seconds after departure. */
 export function trainStateAt(profile: Profile, t: number): TrainState | null {
   if (t < -BOARD_VIS || profile.events.length === 0) return null;
