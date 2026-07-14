@@ -14,6 +14,7 @@
    ============================================================ */
 
 import { useEffect, useRef, useState } from 'react';
+import { ArrowCounterClockwise, ArrowLeft, Moon, Sun } from '@phosphor-icons/react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { lineData, buildStationMap, TUNNELS, MAP_CX, MAP_CY, type Point } from '@/metro/data';
@@ -393,7 +394,10 @@ export default function MetroMap3D() {
       />
       <div ref={hostRef} className="metro3d-canvas" />
 
-      <a className="m3d-pill m3d-back" href="/bangalore-metro">← 2D map</a>
+      <a className="m3d-pill m3d-back" href="/bangalore-metro">
+        <ArrowLeft size={13} weight="bold" />
+        2D map
+      </a>
 
       <div className="m3d-title">
         <div className="m3d-name">Namma Metro — 3D</div>
@@ -408,8 +412,12 @@ export default function MetroMap3D() {
       </div>
 
       <div className="m3d-toolbar">
-        <button onClick={() => setNight(v => !v)} title="Toggle day/night">{night ? '☀' : '☾'}</button>
-        <button onClick={() => resetViewRef.current()} title="Reset view">⟳</button>
+        <button onClick={() => setNight(v => !v)} title="Toggle day/night">
+          {night ? <Sun size={15} weight="bold" /> : <Moon size={15} weight="bold" />}
+        </button>
+        <button onClick={() => resetViewRef.current()} title="Reset view">
+          <ArrowCounterClockwise size={15} weight="bold" />
+        </button>
       </div>
 
       <div className="m3d-hint">Drag to orbit · scroll to zoom · right-drag to pan</div>

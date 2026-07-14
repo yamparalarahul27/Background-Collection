@@ -218,10 +218,14 @@
 #nm-toolbar button:active { transform: scale(0.93); }
 .night #nm-toolbar button { background: rgba(10, 14, 26, 0.92); border-color: rgba(255, 255, 255, 0.12); color: #aaa; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); }
 .night #nm-toolbar button:hover { background: rgba(255, 255, 255, 0.06); color: #ddd; }
+#nm-toolbar button svg { display: block; flex-shrink: 0; }
+.info-close svg { display: block; }
+.dp-arrows button svg, .dp-orient button svg { display: block; margin: 0 auto; }
 #nm-toolbar .tb-3d {
   height: 34px;
   display: inline-flex;
   align-items: center;
+  gap: 5px;
   padding: 0 12px;
   border: 1px solid #e4e2de;
   background: #fff;

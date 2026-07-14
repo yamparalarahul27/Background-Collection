@@ -17,6 +17,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ArrowCounterClockwise, ArrowDown, ArrowLeft, ArrowRight, ArrowUp,
+  Cube, Minus, Moon, Plus, Sun, X,
+} from '@phosphor-icons/react';
+import {
   LINE_MAP, lineData, buildStationMap, ORIENT_DEFAULTS,
   MAP_CX, MAP_CY, LEGEND_FOOTER,
   type LabelDir, type PillOrient, type Station, type Point,
@@ -811,7 +815,9 @@ export default function MetroMap() {
 
       {/* ---------- STATION INFO ---------- */}
       <div id="nm-info" className={selStation ? 'visible' : ''}>
-        <button className="info-close" title="Close" onClick={() => setSelectedStation(null)}>✕</button>
+        <button className="info-close" title="Close" onClick={() => setSelectedStation(null)}>
+          <X size={12} weight="bold" />
+        </button>
         <div className="station-en">{selStation?.en}</div>
         <div className="station-kn">{selStation?.kn}</div>
         <div className="line-badges">
@@ -826,7 +832,9 @@ export default function MetroMap() {
 
       {/* ---------- LINE INFO ---------- */}
       <div id="nm-line-info" className={focusedLine >= 0 ? 'visible' : ''}>
-        <button className="info-close" title="Close" onClick={() => setFocusedLine(-1)}>✕</button>
+        <button className="info-close" title="Close" onClick={() => setFocusedLine(-1)}>
+          <X size={12} weight="bold" />
+        </button>
         {focusedCfg && (() => {
           const ld = lineData[focusedLine];
           const xch = ld.stations.filter(sd => (stations.get(sd.id)?.lines.size ?? 0) > 1);
@@ -870,36 +878,21 @@ export default function MetroMap() {
       {/* ---------- TOOLBAR ---------- */}
       <div id="nm-toolbar">
         <button title="Toggle day/night" onClick={() => setNight(n => !n)} aria-pressed={night}>
-          {night ? (
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <circle cx="12" cy="12" r="4" />
-              <line x1="12" y1="2" x2="12" y2="4" /><line x1="12" y1="20" x2="12" y2="22" />
-              <line x1="4.93" y1="4.93" x2="6.34" y2="6.34" /><line x1="17.66" y1="17.66" x2="19.07" y2="19.07" />
-              <line x1="2" y1="12" x2="4" y2="12" /><line x1="20" y1="12" x2="22" y2="12" />
-              <line x1="4.93" y1="19.07" x2="6.34" y2="17.66" /><line x1="17.66" y1="6.34" x2="19.07" y2="4.93" />
-            </svg>
-          ) : (
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-            </svg>
-          )}
+          {night ? <Sun size={15} weight="bold" /> : <Moon size={15} weight="bold" />}
         </button>
         <button title="Zoom in" onClick={() => zoomBy(1.5)}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
+          <Plus size={15} weight="bold" />
         </button>
         <button title="Zoom out" onClick={() => zoomBy(1 / 1.5)}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
+          <Minus size={15} weight="bold" />
         </button>
         <button title="Reset view" onClick={resetView}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><polyline points="3 3 3 8 8 8" />
-          </svg>
+          <ArrowCounterClockwise size={15} weight="bold" />
         </button>
-        <a className="tb-3d" href="/bangalore-metro/3d" title="Open 3D view">3D</a>
+        <a className="tb-3d" href="/bangalore-metro/3d" title="Open 3D view">
+          <Cube size={14} weight="bold" />
+          3D
+        </a>
       </div>
 
       {/* ---------- STATION EDITOR ---------- */}
@@ -925,9 +918,11 @@ export default function MetroMap() {
               <div className="dp-section">
                 <div className="dp-label">Position (arrow keys · Shift = 10×)</div>
                 <div className="dp-arrows">
-                  <span /><button onClick={() => nudge(0, -1)}>↑</button><span />
-                  <button onClick={() => nudge(-1, 0)}>←</button><span className="dp-dot">·</span><button onClick={() => nudge(1, 0)}>→</button>
-                  <span /><button onClick={() => nudge(0, 1)}>↓</button><span />
+                  <span /><button onClick={() => nudge(0, -1)} aria-label="Nudge up"><ArrowUp size={13} /></button><span />
+                  <button onClick={() => nudge(-1, 0)} aria-label="Nudge left"><ArrowLeft size={13} /></button>
+                  <span className="dp-dot">·</span>
+                  <button onClick={() => nudge(1, 0)} aria-label="Nudge right"><ArrowRight size={13} /></button>
+                  <span /><button onClick={() => nudge(0, 1)} aria-label="Nudge down"><ArrowDown size={13} /></button><span />
                 </div>
                 <div className="dp-step">
                   <label>Step:</label>
@@ -956,8 +951,14 @@ export default function MetroMap() {
                   {(['left', 'top', 'bottom', 'right'] as LabelDir[]).map(d => (
                     <button key={d}
                       className={devStationObj.label === d ? 'sel' : ''}
+                      aria-label={`Label ${d}`}
                       onClick={() => setOverrideField(devStationObj.id, { label: d })}>
-                      {{ left: '←', top: '↑', bottom: '↓', right: '→' }[d]}
+                      {{
+                        left: <ArrowLeft size={13} />,
+                        top: <ArrowUp size={13} />,
+                        bottom: <ArrowDown size={13} />,
+                        right: <ArrowRight size={13} />,
+                      }[d]}
                     </button>
                   ))}
                 </div>
