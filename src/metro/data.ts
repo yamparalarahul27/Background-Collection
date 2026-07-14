@@ -37,6 +37,8 @@ export interface StationDef {
   label: LabelDir;
   /** minor station — label hidden until hover, like Tokyo's local stops */
   local?: boolean;
+  /** station is in the tunnel section — rendered with a dashed marker */
+  underground?: boolean;
   /** multi-line English rendering, e.g. long names split in two rows */
   enLines?: string[];
 }
@@ -77,11 +79,11 @@ export const purpleStations: StationDef[] = [
   { id: 'halasuru',          en: 'Halasuru',              kn: 'ಹಲಸೂರು',                 x: 1180, y: 700, label: 'bottom', local: true },
   { id: 'trinity',           en: 'Trinity',               kn: 'ಟ್ರಿನಿಟಿ',               x: 1110, y: 700, label: 'top',    local: true },
   { id: 'mg-road',           en: 'MG Road',               kn: 'ಎಂ.ಜಿ. ರಸ್ತೆ',           x: 1040, y: 700, label: 'bottom' },
-  { id: 'cubbon-park',       en: 'Cubbon Park',           kn: 'ಕಬ್ಬನ್ ಪಾರ್ಕ್',          x: 970,  y: 700, label: 'top' },
-  { id: 'vidhana-soudha',    en: 'Vidhana Soudha',        kn: 'ವಿಧಾನ ಸೌಧ',              x: 900,  y: 700, label: 'bottom' },
-  { id: 'central-college',   en: 'Central College',       kn: 'ಸೆಂಟ್ರಲ್ ಕಾಲೇಜು',        x: 830,  y: 700, label: 'top',    local: true },
-  { id: 'majestic',          en: 'Majestic',              kn: 'ಮೆಜೆಸ್ಟಿಕ್',             x: 760,  y: 700, label: 'bottom' },
-  { id: 'city-railway',      en: 'City Railway Station',  kn: 'ಸಿಟಿ ರೈಲ್ವೆ ನಿಲ್ದಾಣ',    x: 700,  y: 700, label: 'top',    local: true },
+  { id: 'cubbon-park',       en: 'Cubbon Park',           kn: 'ಕಬ್ಬನ್ ಪಾರ್ಕ್',          x: 970,  y: 700, label: 'top',    underground: true },
+  { id: 'vidhana-soudha',    en: 'Vidhana Soudha',        kn: 'ವಿಧಾನ ಸೌಧ',              x: 900,  y: 700, label: 'bottom', underground: true },
+  { id: 'central-college',   en: 'Central College',       kn: 'ಸೆಂಟ್ರಲ್ ಕಾಲೇಜು',        x: 830,  y: 700, label: 'top',    local: true, underground: true },
+  { id: 'majestic',          en: 'Majestic',              kn: 'ಮೆಜೆಸ್ಟಿಕ್',             x: 760,  y: 700, label: 'bottom', underground: true },
+  { id: 'city-railway',      en: 'City Railway Station',  kn: 'ಸಿಟಿ ರೈಲ್ವೆ ನಿಲ್ದಾಣ',    x: 700,  y: 700, label: 'top',    local: true, underground: true },
   { id: 'magadi-road',       en: 'Magadi Road',           kn: 'ಮಾಗಡಿ ರಸ್ತೆ',            x: 640,  y: 700, label: 'bottom', local: true },
   { id: 'hosahalli',         en: 'Hosahalli',             kn: 'ಹೊಸಹಳ್ಳಿ',               x: 580,  y: 700, label: 'top',    local: true },
   { id: 'vijayanagar',       en: 'Vijayanagar',           kn: 'ವಿಜಯನಗರ',                x: 520,  y: 700, label: 'bottom' },
@@ -129,9 +131,9 @@ export const greenStations: StationDef[] = [
   { id: 'kuvempu-road',      en: 'Mahakavi Kuvempu Road', kn: 'ಕುವೆಂಪು ರಸ್ತೆ',         x: 760, y: 530,  label: 'left',   local: true },
   { id: 'srirampura',        en: 'Srirampura',            kn: 'ಶ್ರೀರಾಂಪುರ',            x: 760, y: 585,  label: 'left',   local: true },
   { id: 'sampige-road',      en: 'Sampige Road',          kn: 'ಸಂಪಿಗೆ ರಸ್ತೆ',          x: 760, y: 640,  label: 'left' },
-  { id: 'majestic',          en: 'Majestic',              kn: 'ಮೆಜೆಸ್ಟಿಕ್',            x: 760, y: 700,  label: 'bottom' },
-  { id: 'chickpete',         en: 'Chickpete',             kn: 'ಚಿಕ್ಕಪೇಟೆ',             x: 760, y: 755,  label: 'right' },
-  { id: 'kr-market',         en: 'KR Market',             kn: 'ಕೆ.ಆರ್. ಮಾರುಕಟ್ಟೆ',     x: 760, y: 810,  label: 'right' },
+  { id: 'majestic',          en: 'Majestic',              kn: 'ಮೆಜೆಸ್ಟಿಕ್',            x: 760, y: 700,  label: 'bottom', underground: true },
+  { id: 'chickpete',         en: 'Chickpete',             kn: 'ಚಿಕ್ಕಪೇಟೆ',             x: 760, y: 755,  label: 'right',  underground: true },
+  { id: 'kr-market',         en: 'KR Market',             kn: 'ಕೆ.ಆರ್. ಮಾರುಕಟ್ಟೆ',     x: 760, y: 810,  label: 'right',  underground: true },
   { id: 'national-college',  en: 'National College',      kn: 'ನ್ಯಾಷನಲ್ ಕಾಲೇಜು',       x: 760, y: 865,  label: 'right',  local: true },
   { id: 'lalbagh',           en: 'Lalbagh',               kn: 'ಲಾಲ್‌ಬಾಗ್',             x: 760, y: 920,  label: 'right' },
   { id: 'south-end',         en: 'South End Circle',      kn: 'ಸೌತ್ ಎಂಡ್ ಸರ್ಕಲ್',      x: 760, y: 975,  label: 'right',  local: true },
@@ -214,6 +216,7 @@ export function buildStationMap(): Map<string, Station> {
       if (existing) {
         existing.lines.add(ld.cfg.id);
         if (!s.local) existing.local = false;
+        if (s.underground) existing.underground = true;
       } else {
         map.set(s.id, { ...s, lines: new Set([ld.cfg.id]) });
       }
@@ -221,6 +224,14 @@ export function buildStationMap(): Map<string, Station> {
   });
   return map;
 }
+
+/** Tunnel sections — track between (and a little beyond) these stations is
+    rendered as underground: faded corridor, portal ticks at each end.
+    `pad` extends the tunnel past the end stations toward the portals. */
+export const TUNNELS: { line: string; from: string; to: string; pad: number }[] = [
+  { line: 'purple', from: 'cubbon-park', to: 'city-railway', pad: 30 },
+  { line: 'green',  from: 'majestic',    to: 'kr-market',    pad: 28 },
+];
 
 /** Baked-in pill orientations for interchanges (editable in the Station Editor). */
 export const ORIENT_DEFAULTS: Record<string, PillOrient> = {

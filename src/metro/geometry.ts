@@ -114,3 +114,38 @@ export function offsetPolyline(pts: Point[], o: number): Point[] {
 export function polylinePathD(pts: Point[]): string {
   return `M ${pts[0].join(',')} ${pts.slice(1).map(p => `L ${p.join(',')}`).join(' ')}`;
 }
+
+/* ---------- corner rounding ----------
+   Replaces each interior corner with a sampled quadratic fillet so
+   tracks curve like real alignments. Returning a densified polyline
+   (rather than bezier path commands) keeps everything downstream —
+   train motion, offsetting, distance projection — working unchanged
+   on straight segments. */
+
+export function roundCorners(pts: Point[], radius: number, samples = 8): Point[] {
+  if (pts.length < 3) return pts.slice();
+  const out: Point[] = [pts[0].slice() as Point];
+  for (let i = 1; i < pts.length - 1; i++) {
+    const a = pts[i - 1], p = pts[i], b = pts[i + 1];
+    const vAx = p[0] - a[0], vAy = p[1] - a[1];
+    const vBx = b[0] - p[0], vBy = b[1] - p[1];
+    const lA = Math.hypot(vAx, vAy) || 1, lB = Math.hypot(vBx, vBy) || 1;
+    const uAx = vAx / lA, uAy = vAy / lA, uBx = vBx / lB, uBy = vBy / lB;
+    const cross = uAx * uBy - uAy * uBx;
+    if (Math.abs(cross) < 1e-4) { out.push(p.slice() as Point); continue; }
+    const dot = Math.max(-1, Math.min(1, uAx * uBx + uAy * uBy));
+    const turn = Math.acos(dot);
+    // Tangent length for the fillet, clamped so adjacent corners never overlap.
+    const t = Math.min(radius * Math.tan(turn / 2), lA / 2 - 1, lB / 2 - 1);
+    if (t <= 0.5) { out.push(p.slice() as Point); continue; }
+    const p1x = p[0] - uAx * t, p1y = p[1] - uAy * t;
+    const p2x = p[0] + uBx * t, p2y = p[1] + uBy * t;
+    for (let s = 0; s <= samples; s++) {
+      const u = s / samples, w = 1 - u;
+      out.push([w * w * p1x + 2 * w * u * p[0] + u * u * p2x,
+                w * w * p1y + 2 * w * u * p[1] + u * u * p2y]);
+    }
+  }
+  out.push(pts[pts.length - 1].slice() as Point);
+  return out;
+}

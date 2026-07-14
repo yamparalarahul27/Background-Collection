@@ -21,7 +21,8 @@ import {
   MAP_CX, MAP_CY, LEGEND_FOOTER,
   type LabelDir, type PillOrient, type Station, type Point,
 } from '@/metro/data';
-import { buildGeometry, offsetPolyline, polylinePathD, type Geometry } from '@/metro/geometry';
+import { buildGeometry, offsetPolyline, polylinePathD, roundCorners, type Geometry } from '@/metro/geometry';
+import { TUNNELS } from '@/metro/data';
 import {
   COMPRESS, buildProfile, distAt, poolSize, currentHeadway,
   istHour, isPeak, SERVICE_START, SERVICE_END, type Profile,
@@ -33,6 +34,8 @@ const DASH_SPEED = 12;
     px to the left of the direction of travel. */
 const TRACK_OFFSET = 4;
 const TRACK_WIDTH = 2.5;
+/** Fillet radius for track corners. */
+const CURVE_RADIUS = 18;
 
 /* ---------- Overrides (Station Editor) ---------- */
 
@@ -128,17 +131,51 @@ export default function MetroMap() {
     );
   }, [stations]);
 
-  const geometries = useMemo<Geometry[]>(() => {
-    return lineData.map((ld, li) => buildGeometry(effectivePts[li], ld.cfg.loop));
+  /** Densified centreline with corners rounded into fillet curves —
+      trains steer smoothly through bends and tracks render as curves. */
+  const densePts = useMemo<Point[][]>(() => {
+    return effectivePts.map(pts => roundCorners(pts, CURVE_RADIUS));
   }, [effectivePts]);
+
+  const geometries = useMemo<Geometry[]>(() => {
+    return lineData.map((ld, li) => buildGeometry(densePts[li], ld.cfg.loop));
+  }, [densePts]);
 
   /** Double track: one parallel path per direction, offset ±TRACK_OFFSET. */
   const trackPaths = useMemo<[string, string][]>(() => {
-    return effectivePts.map(pts => [
+    return densePts.map(pts => [
       polylinePathD(offsetPolyline(pts, TRACK_OFFSET)),
       polylinePathD(offsetPolyline(pts, -TRACK_OFFSET)),
     ]);
-  }, [effectivePts]);
+  }, [densePts]);
+
+  /** Tunnel overlays: a background-coloured band over the corridor between
+      the tunnel's end stations (+ portal pad). Trains render underneath, so
+      they visibly dim underground and re-emerge at the portals. */
+  const tunnelPaths = useMemo(() => {
+    return TUNNELS.map(tn => {
+      const li = lineData.findIndex(ld => ld.cfg.id === tn.line);
+      const geo = geometries[li];
+      const sd = lineData[li].stations;
+      const distOf = (id: string) => {
+        const st = stations.get(id);
+        return st && sd.some(s => s.id === id) ? geo.distanceOf(st.x, st.y) : 0;
+      };
+      let d1 = distOf(tn.from), d2 = distOf(tn.to);
+      if (d1 > d2) [d1, d2] = [d2, d1];
+      const dA = Math.max(0, d1 - tn.pad);
+      const dB = Math.min(geo.total, d2 + tn.pad);
+      const pts: Point[] = [];
+      for (let d = dA; d < dB; d += 8) { const p = geo.posAt(d); pts.push([p.x, p.y]); }
+      const pe = geo.posAt(dB); pts.push([pe.x, pe.y]);
+      const portals = [dA, dB].map(d => {
+        const p = geo.posAt(d);
+        const rad = p.angle * Math.PI / 180;
+        return { x: p.x, y: p.y, nx: Math.sin(rad), ny: -Math.cos(rad) };
+      });
+      return { li, d: polylinePathD(pts), portals, color: lineData[li].cfg.color };
+    });
+  }, [geometries, stations]);
 
   /** Per line: path distance of each of its stations (for ring proximity). */
   const stationDists = useMemo(() => {
@@ -631,6 +668,21 @@ export default function MetroMap() {
             </g>
           ))}
 
+          {/* tunnel sections — drawn ABOVE trains so they dim underground,
+              below stations so markers stay crisp */}
+          {tunnelPaths.map((tn, i) => (
+            <g key={`tunnel-${i}`} className={`tunnel-grp${focusedLine >= 0 && focusedLine !== tn.li ? ' dimmed' : ''}`}>
+              <path className="tunnel-overlay" d={tn.d} fill="none"
+                strokeWidth={TRACK_OFFSET * 2 + TRACK_WIDTH + 4} strokeLinecap="butt" />
+              {tn.portals.map((p, pi) => (
+                <line key={pi} className="tunnel-portal"
+                  x1={p.x + p.nx * 8.5} y1={p.y + p.ny * 8.5}
+                  x2={p.x - p.nx * 8.5} y2={p.y - p.ny * 8.5}
+                  stroke={tn.color} strokeWidth={1.6} />
+              ))}
+            </g>
+          ))}
+
           {/* stations */}
           {allStations.map(s => {
             const ic = isInterchange(s);
@@ -663,7 +715,8 @@ export default function MetroMap() {
                   return (
                     <>
                       <rect className="station-mask" x={px - 2} y={py - 2} width={pw + 4} height={ph + 4} rx={rx + 2} />
-                      <rect className="station-marker pill-bg" x={px} y={py} width={pw} height={ph} rx={rx} strokeWidth={1.5} />
+                      <rect className="station-marker pill-bg" x={px} y={py} width={pw} height={ph} rx={rx}
+                        strokeWidth={1.5} strokeDasharray={s.underground ? '3 2' : undefined} />
                       <rect className="station-warm" x={px} y={py} width={pw} height={ph} rx={rx} fill="#FFEEBB" />
                       {colors.map((c, i) => (
                         <circle
@@ -680,7 +733,8 @@ export default function MetroMap() {
                   <>
                     <rect className="station-mask" x={s.x - 7} y={s.y - 7} width={14} height={14} rx={1.5} />
                     <rect className="station-marker" x={s.x - 5} y={s.y - 5} width={10} height={10} rx={0.8}
-                      stroke={colors[0]} strokeWidth={1.5} />
+                      stroke={colors[0]} strokeWidth={1.5}
+                      strokeDasharray={s.underground ? '2.4 1.7' : undefined} />
                     <rect className="station-warm" x={s.x - 3.5} y={s.y - 3.5} width={7} height={7} rx={0.5} fill="#FFEEBB" />
                   </>
                 )}
@@ -735,6 +789,7 @@ export default function MetroMap() {
         <div className="legend-footer">
           {LEGEND_FOOTER}
           <br />Two-way service on the IST clock · time runs {COMPRESS}×
+          <br />Faded track &amp; dashed markers = underground
         </div>
       </div>
 
