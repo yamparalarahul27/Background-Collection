@@ -134,18 +134,19 @@ export function currentHeadway(cfg: LineConfig, now = new Date()): number | null
 
 /* ---------- terminus turnaround ----------
    A service is more than its run: the train is visible boarding at
-   the origin before departure, and after arriving it pauses, slides
-   across the crossover to the opposite track, lingers, and fades as
-   the return departure (on the other direction's schedule, phased to
-   line up) fades in at the same spot. Visual seconds. */
+   the origin before departure, and after arriving it waits at its own
+   arrival platform, then slides across the crossover timed to land
+   exactly as the return departure (on the other direction's schedule)
+   fades in at the same spot — one continuous turnaround, and a berth
+   never holds two solid trains. Visual seconds. */
 
 export const BOARD_VIS = 1.2;     // sitting at the origin before departure
 export const FADE_VIS = 0.4;      // fade in/out at the seam
 export const TURN_SLIDE = 1.0;    // crossover slide to the opposite track
-export const TURN_LINGER = 0.8;   // settled on the departure track
+export const TURN_PAUSE = 0.4;    // minimum pause at the arrival platform
 
-/** Total extra time a train exists past its arrival. */
-export const TURN_TOTAL = TURN_SLIDE + TURN_LINGER + FADE_VIS;
+/** Minimum extra time a train exists past its arrival. */
+export const TURN_TOTAL = TURN_PAUSE + TURN_SLIDE + FADE_VIS;
 
 export interface TrainState {
   /** distance along the profile (0 = origin terminus) */
@@ -167,8 +168,11 @@ export function isDwelling(profile: Profile, t: number): boolean {
   return evs[lo].type === 'dwell';
 }
 
-/** Full visual lifecycle of one service at `t` seconds after departure. */
-export function trainStateAt(profile: Profile, t: number): TrainState | null {
+/** Full visual lifecycle of one service at `t` seconds after departure.
+    `slideDelay` is how long the arrived train waits at its own platform
+    before crossing over; on landing it immediately crossfades out
+    (mirroring the return train's boarding fade-in exactly). */
+export function trainStateAt(profile: Profile, t: number, slideDelay = TURN_PAUSE): TrainState | null {
   if (t < -BOARD_VIS || profile.events.length === 0) return null;
   if (t < 0) {
     const op = Math.min(1, (t + BOARD_VIS) / FADE_VIS);
@@ -179,28 +183,55 @@ export function trainStateAt(profile: Profile, t: number): TrainState | null {
     return d == null ? null : { d, crossover: 0, opacity: 1 };
   }
   const over = t - profile.total;
-  if (over <= TURN_SLIDE) {
-    const u = over / TURN_SLIDE;
-    return { d: profile.endDist, crossover: u * u * (3 - 2 * u), opacity: 1 };
+  const slideEnd = slideDelay + TURN_SLIDE;
+  if (over > slideEnd + FADE_VIS) return null;
+  const opacity = over <= slideEnd ? 1 : 1 - (over - slideEnd) / FADE_VIS;
+  if (over <= slideDelay) return { d: profile.endDist, crossover: 0, opacity: 1 };
+  if (over <= slideEnd) {
+    const u = (over - slideDelay) / TURN_SLIDE;
+    return { d: profile.endDist, crossover: u * u * (3 - 2 * u), opacity };
   }
-  if (over <= TURN_SLIDE + TURN_LINGER) {
-    return { d: profile.endDist, crossover: 1, opacity: 1 };
+  return { d: profile.endDist, crossover: 1, opacity };
+}
+
+/** How long an arrived train waits at its own platform before crossing
+    over — timed so the crossover LANDS exactly when the next return
+    departure starts boarding, and the two crossfade with opacities
+    summing to one. Falls back to a prompt slide-and-fade if waiting
+    would collide with the next arrival behind it. */
+export function turnaroundSlideDelay(
+  profile: Profile, headwayVis: number, phaseSelf: number, phaseOpp: number, n: number,
+): number {
+  // Wall time when this service reaches the far terminus.
+  const arrive = n * headwayVis + phaseSelf + profile.total;
+  // Opposite direction's boarding-start lattice: m*H + phaseOpp - BOARD_VIS.
+  const anchor = phaseOpp - BOARD_VIS;
+  // Earliest crossover landing after the platform pause. The aligned end
+  // sits exactly on a lattice point by construction — the epsilon keeps
+  // floating error from tipping ceil() up a whole headway.
+  const minLand = arrive + TURN_PAUSE + TURN_SLIDE;
+  const land = Math.ceil((minLand - anchor) / headwayVis - 1e-6) * headwayVis + anchor;
+  let slideDelay = land - TURN_SLIDE - arrive;
+  // The arrival platform must clear before the NEXT train arrives behind
+  // us. If waiting for the aligned boarding slot would take too long,
+  // slip across once the PREVIOUS departure has pulled clear of the berth.
+  if (slideDelay > headwayVis - 0.8) {
+    slideDelay = slideDelay - headwayVis + BOARD_VIS + FADE_VIS + 0.4;
   }
-  if (over <= TURN_TOTAL) {
-    return { d: profile.endDist, crossover: 1, opacity: 1 - (over - TURN_SLIDE - TURN_LINGER) / FADE_VIS };
-  }
-  return null;
+  return slideDelay;
 }
 
 /** Phase (seconds into the headway cycle, visual time) for the opposite
-    direction so its departures line up with arriving trains completing
-    their crossover — the eye reads a continuous turnaround. */
+    direction so its boardings line up with arriving trains landing off
+    the crossover — the eye reads a continuous turnaround. */
 export function returnPhase(profile: Profile, headwayVis: number): number {
-  const t = profile.total + TURN_SLIDE + TURN_LINGER + BOARD_VIS;
+  const t = profile.total + TURN_PAUSE + TURN_SLIDE + BOARD_VIS;
   return ((t % headwayVis) + headwayVis) % headwayVis;
 }
 
-/** Trains needed per direction to cover boarding + trip + turnaround at peak. */
+/** Trains needed per direction to cover boarding + trip + turnaround at peak
+    (the platform wait can extend up to one extra headway). */
 export function poolSize(profile: Profile, cfg: LineConfig): number {
-  return Math.ceil((profile.total + BOARD_VIS + TURN_TOTAL) / (cfg.headwayPeak / COMPRESS)) + 1;
+  const H = cfg.headwayPeak / COMPRESS;
+  return Math.ceil((profile.total + BOARD_VIS + TURN_TOTAL + H) / H) + 1;
 }

@@ -19,7 +19,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { lineData, buildStationMap, TUNNELS, MAP_CX, MAP_CY, type Point } from '@/metro/data';
 import { buildGeometry, roundCorners, type Geometry } from '@/metro/geometry';
-import { buildProfile, currentHeadway, poolSize, trainStateAt, returnPhase, BOARD_VIS, COMPRESS, istHour, SERVICE_START, SERVICE_END, isPeak, autoNight, twilightStrength, type Profile } from '@/metro/service';
+import { buildProfile, currentHeadway, poolSize, trainStateAt, returnPhase, turnaroundSlideDelay, BOARD_VIS, COMPRESS, istHour, SERVICE_START, SERVICE_END, isPeak, autoNight, twilightStrength, type Profile } from '@/metro/service';
 
 const EL = 16;        // viaduct height
 const UG = -14;       // tunnel depth
@@ -320,18 +320,20 @@ export default function MetroMap3D() {
 
       lines.forEach((L, li) => {
         const headway = currentHeadway(L.cfg, wallDate);
+        const H = headway != null ? headway / COMPRESS : 1;
+        const phases: [number, number] = [0, headway != null ? returnPhase(L.profile, H) : 0];
         for (let dir = 0; dir < 2; dir++) {
           const slots = trainPools[li][dir];
           if (headway == null) { slots.forEach(t => { t.group.visible = false; }); continue; }
-          const H = headway / COMPRESS;
-          const phase = dir ? returnPhase(L.profile, H) : 0;
+          const phase = phases[dir];
           const latest = Math.floor((now + BOARD_VIS - phase) / H);
           for (let k = 0; k < L.pool; k++) {
             const n = latest - k;
             const slot = ((n % L.pool) + L.pool) % L.pool;
             const t = slots[slot];
             const elapsed = now - (n * H + phase);
-            const st = trainStateAt(L.profile, elapsed);
+            const slideDelay = turnaroundSlideDelay(L.profile, H, phase, phases[1 - dir], n);
+            const st = trainStateAt(L.profile, elapsed, slideDelay);
             // 3D has no per-object fade — trains pop at the fade midpoint.
             if (!st || st.opacity < 0.5) { t.group.visible = false; continue; }
             t.group.visible = true;

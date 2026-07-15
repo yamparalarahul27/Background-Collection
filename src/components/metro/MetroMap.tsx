@@ -29,7 +29,7 @@ import { buildGeometry, offsetPolyline, polylinePathD, roundCorners, type Geomet
 import { TUNNELS, LANDMARKS } from '@/metro/data';
 import {
   COMPRESS, buildProfile, poolSize, currentHeadway, trainStateAt, returnPhase,
-  BOARD_VIS, istHour, isPeak, autoNight, twilightStrength, isDwelling,
+  turnaroundSlideDelay, BOARD_VIS, istHour, isPeak, autoNight, twilightStrength, isDwelling,
   SERVICE_START, SERVICE_END, type Profile,
 } from '@/metro/service';
 
@@ -328,6 +328,10 @@ export default function MetroMap() {
         active.length = 0;
 
         const headwayReal = currentHeadway(ld.cfg, wallDate);
+        const H = headwayReal != null ? headwayReal / COMPRESS : 1;
+        // Return departures are phased so they pick up right where an
+        // arriving train finishes its crossover — a visible turnaround.
+        const phases: [number, number] = [0, headwayReal != null ? returnPhase(profile, H) : 0];
         for (let dir = 0; dir < 2; dir++) {
           const slots = trainPools.current[li]?.[dir] ?? [];
           if (headwayReal == null) {
@@ -335,10 +339,7 @@ export default function MetroMap() {
             for (const el of slots) if (el) el.style.display = 'none';
             continue;
           }
-          const H = headwayReal / COMPRESS;
-          // Return departures are phased so they pick up right where an
-          // arriving train finishes its crossover — a visible turnaround.
-          const phase = dir ? returnPhase(profile, H) : 0;
+          const phase = phases[dir];
           // Include the next departure too: it is visible boarding early.
           const latest = Math.floor((now + BOARD_VIS - phase) / H);
           for (let k = 0; k < pool; k++) {
@@ -347,7 +348,10 @@ export default function MetroMap() {
             const el = slots[slot];
             if (!el) continue;
             const elapsed = now - (n * H + phase);
-            const st = trainStateAt(profile, elapsed);
+            // Park after arrival until the next return boarding slot, so a
+            // berth never shows two trains at once — they crossfade instead.
+            const slideDelay = turnaroundSlideDelay(profile, H, phase, phases[1 - dir], n);
+            const st = trainStateAt(profile, elapsed, slideDelay);
             if (!st) { el.style.display = 'none'; continue; }
             // Direction B runs the mirrored profile from the far terminus.
             const dist = dir ? geo.total - st.d : st.d;
