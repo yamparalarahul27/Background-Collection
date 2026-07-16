@@ -14,7 +14,8 @@
    ============================================================ */
 
 import { useEffect, useRef, useState } from 'react';
-import { ArrowCounterClockwise, ArrowLeft, Moon, Sun } from '@phosphor-icons/react';
+import Link from 'next/link';
+import { ArrowCounterClockwise, ArrowLeft, Moon, Sun, X } from '@phosphor-icons/react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { lineData, buildStationMap, TUNNELS, MAP_CX, MAP_CY, type Point } from '@/metro/data';
@@ -53,6 +54,8 @@ export default function MetroMap3D() {
   const [themeMode, setThemeMode] = useState<'auto' | 'day' | 'night'>('auto');
   const applyThemeRef = useRef<(n: boolean) => void>(() => {});
   const resetViewRef = useRef<() => void>(() => {});
+  const exitRideRef = useRef<() => void>(() => {});
+  const [riding, setRiding] = useState(false);
   const [svcNow, setSvcNow] = useState<Date | null>(null);
 
   const clockH = svcNow ? istHour(svcNow) : null;
@@ -389,6 +392,9 @@ export default function MetroMap3D() {
     });
 
     interface TrainRt { group: THREE.Group; coaches: THREE.Object3D[]; light: THREE.Mesh }
+    /** Every train group, for click-to-board raycasting (invisible ones are
+        skipped automatically by intersectObjects). */
+    const rideTargets: THREE.Object3D[] = [];
     const bodyMats: { mat: THREE.MeshLambertMaterial; base: THREE.Color }[] = [];
     const windowMats: THREE.MeshLambertMaterial[] = [];
     const cabMats: THREE.MeshLambertMaterial[] = [];
@@ -434,10 +440,61 @@ export default function MetroMap3D() {
         const light = new THREE.Mesh(headlightGeo, headlightMat);
         coaches[0].add(light);
         scene.add(group);
-        return { group, coaches, light };
+        const rt: TrainRt = { group, coaches, light };
+        group.userData.rt = rt;   // walked up to from a raycast hit
+        rideTargets.push(group);
+        return rt;
       };
       return [0, 1].map(() => Array.from({ length: L.pool }, mkTrain));
     });
+
+    /* ---------- ride the cab ----------
+       Click a train to ride in its front cab; the camera locks to the lead
+       coach and looks down the line, so it travels the whole route on the
+       schedule — through curves, up/down the tunnel ramps, dwelling at
+       stations. Esc or the Exit button hands control back to the orbit cam. */
+    let ridden: TrainRt | null = null;
+    const lastRidePos = new THREE.Vector3(MAP_CX, EL, MAP_CY);
+    const raycaster = new THREE.Raycaster();
+    const ndc = new THREE.Vector2();
+
+    const boardTrain = (rt: TrainRt) => {
+      ridden = rt;
+      controls.enabled = false;
+      camera.fov = 72; camera.updateProjectionMatrix();
+      setRiding(true);
+    };
+    const exitRide = () => {
+      if (!ridden) return;
+      ridden = null;
+      camera.fov = 50; camera.updateProjectionMatrix();
+      // resume the orbit cam framed on where the ride left off
+      controls.target.copy(lastRidePos);
+      camera.position.set(lastRidePos.x + 160, lastRidePos.y + 130, lastRidePos.z + 160);
+      controls.enabled = true;
+      setRiding(false);
+    };
+    exitRideRef.current = exitRide;
+
+    let downX = 0, downY = 0;
+    const onDown = (e: PointerEvent) => { downX = e.clientX; downY = e.clientY; };
+    const onClick = (e: MouseEvent) => {
+      // ignore orbit drags — only a genuine click boards
+      if (Math.hypot(e.clientX - downX, e.clientY - downY) > 6) return;
+      const rect = renderer.domElement.getBoundingClientRect();
+      ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(ndc, camera);
+      const hits = raycaster.intersectObjects(rideTargets, true);
+      if (!hits.length) return;
+      let o: THREE.Object3D | null = hits[0].object;
+      while (o && !o.userData.rt) o = o.parent;
+      if (o && o.userData.rt) boardTrain(o.userData.rt as TrainRt);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') exitRide(); };
+    renderer.domElement.addEventListener('pointerdown', onDown);
+    renderer.domElement.addEventListener('click', onClick);
+    window.addEventListener('keydown', onKey);
 
     /* ---------- theme ---------- */
     const applyTheme = (n: boolean) => {
@@ -460,6 +517,7 @@ export default function MetroMap3D() {
     applyTheme(nightRef.current);
 
     resetViewRef.current = () => {
+      exitRide();
       camera.position.set(MAP_CX + 260, 1050, MAP_CY + 1150);
       controls.target.set(MAP_CX, 0, MAP_CY);
     };
@@ -467,9 +525,12 @@ export default function MetroMap3D() {
     /* ---------- animation ---------- */
     let raf = 0;
     const euler = new THREE.Euler(0, 0, 0, 'YZX');
+    const tmpV = new THREE.Vector3();
     const frame = () => {
       const now = Date.now() / 1000;
       const wallDate = new Date();
+      // Lead-coach pose of the ridden train, captured while it is positioned.
+      let rideCap: { li: number; x: number; y: number; z: number; heading: number; cd: number; dir: number } | null = null;
 
       lines.forEach((L, li) => {
         const headway = currentHeadway(L.cfg, wallDate);
@@ -508,12 +569,39 @@ export default function MetroMap3D() {
               c.position.set(p.x + nx * off, y, p.y + nz * off);
               euler.set(0, -heading, pitch);
               c.setRotationFromEuler(euler);
+              if (ridden && t === ridden && ci === 0) {
+                rideCap = { li, x: p.x + nx * off, y, z: p.y + nz * off, heading, cd, dir };
+              }
             }
           }
         }
       });
 
-      controls.update();
+      if (ridden) {
+        if (rideCap) {
+          const { li, x, y, z, heading, cd, dir } = rideCap;
+          const geo = lines[li].geo;
+          // Perch just above and ahead of the lead cab, looking down the line —
+          // a driver's-eye view with only a sliver of the nose in frame.
+          const fx = Math.cos(heading), fz = Math.sin(heading);
+          const desired = tmpV.set(x + fx * 5.6, y + 2.1, z + fz * 5.6);
+          camera.position.lerp(desired, 0.5);
+          lastRidePos.copy(desired);
+          // look down the track ahead — follows curves and tunnel ramps
+          const ahead = cd + (dir ? -1 : 1) * 70;
+          const ap = geo.posAtExt(ahead);
+          const ah = ap.angle * Math.PI / 180 + (dir ? Math.PI : 0);
+          const anx = Math.sin(ah), anz = -Math.cos(ah);
+          const ty = elevAt(li, Math.max(0, Math.min(geo.total, ahead))) + 3.4 + 1.4;
+          camera.lookAt(ap.x + anx * TRACK_OFFSET, ty, ap.y + anz * TRACK_OFFSET);
+        } else {
+          // the ridden train finished its run (faded out) — hand back to orbit
+          exitRide();
+          controls.update();
+        }
+      } else {
+        controls.update();
+      }
       renderer.render(scene, camera);
       raf = requestAnimationFrame(frame);
     };
@@ -529,6 +617,9 @@ export default function MetroMap3D() {
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', onResize);
+      window.removeEventListener('keydown', onKey);
+      renderer.domElement.removeEventListener('pointerdown', onDown);
+      renderer.domElement.removeEventListener('click', onClick);
       controls.dispose();
       renderer.dispose();
       sprites.forEach(sp => { sp.material.map?.dispose(); sp.material.dispose(); });
@@ -552,13 +643,20 @@ export default function MetroMap3D() {
       />
       <div ref={hostRef} className="metro3d-canvas" />
 
-      <a className="m3d-pill m3d-back" href="/">
+      <Link className="m3d-pill m3d-back" href="/">
         <ArrowLeft size={13} weight="bold" />
         2D map
-      </a>
+      </Link>
+
+      {riding && (
+        <button className="m3d-pill m3d-exit" onClick={() => exitRideRef.current()}>
+          <X size={13} weight="bold" />
+          Exit ride
+        </button>
+      )}
 
       <div className="m3d-title">
-        <div className="m3d-name">Namma Metro — 3D</div>
+        <div className="m3d-name">{riding ? 'Namma Metro — cab view' : 'Namma Metro — 3D'}</div>
         {h != null && (
           <div className="m3d-status">
             <span className={`svc-dot ${open ? 'on' : 'off'}`} />
@@ -583,7 +681,11 @@ export default function MetroMap3D() {
         </button>
       </div>
 
-      <div className="m3d-hint">Drag to orbit · scroll to zoom · right-drag to pan</div>
+      <div className="m3d-hint">
+        {riding
+          ? 'Riding the cab · Esc or Exit to leave'
+          : 'Click a train to ride · drag to orbit · scroll to zoom'}
+      </div>
     </div>
   );
 }
