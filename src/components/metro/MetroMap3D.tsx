@@ -15,7 +15,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ArrowCounterClockwise, ArrowLeft, Moon, Sun, X } from '@phosphor-icons/react';
+import { ArrowCounterClockwise, ArrowLeft, Moon, Sun, Train, X } from '@phosphor-icons/react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { lineData, buildStationMap, TUNNELS, MAP_CX, MAP_CY, type Point } from '@/metro/data';
@@ -28,6 +28,11 @@ const RAMP = 80;      // portal ramp length along the track
 const TRACK_OFFSET = 4;
 const TRACK_W = 2.2;
 const COACH_SPACING = 9.7;
+/** The 24/7 sightseeing service — a distinct amber livery, a gentle cruise
+    (map-units per real second), and its own coach count. */
+const TOUR_COLOR = '#F5A623';
+const TOUR_SPEED = 34;
+const TOUR_COACHES = 3;
 
 const DAY = {
   bg: 0xf7f6f3, ground: 0xffffff, grid: 0xe3e1dc, hemi: 0.95, sun: 0.9,
@@ -55,6 +60,7 @@ export default function MetroMap3D() {
   const applyThemeRef = useRef<(n: boolean) => void>(() => {});
   const resetViewRef = useRef<() => void>(() => {});
   const exitRideRef = useRef<() => void>(() => {});
+  const boardTourRef = useRef<() => void>(() => {});
   const [riding, setRiding] = useState(false);
   const [svcNow, setSvcNow] = useState<Date | null>(null);
 
@@ -100,6 +106,37 @@ export default function MetroMap3D() {
         });
       return { geo, profile, pool: poolSize(profile, ld.cfg), ranges, cfg: ld.cfg };
     });
+
+    // Tour loop — one continuous path threading every line through the shared
+    // interchanges (Majestic, RV Road) so a single train can tour the whole
+    // network. Joins land on shared interchange/terminus coordinates, so the
+    // polyline is continuous; termini become natural turnarounds.
+    const tourGeo = (() => {
+      const P = lineData[0].points, G = lineData[1].points, Y = lineData[2].points;
+      const seg = (arr: Point[], a: number, b: number): Point[] => {
+        const out: Point[] = [];
+        if (a <= b) for (let i = a; i <= b; i++) out.push(arr[i]);
+        else for (let i = a; i >= b; i--) out.push(arr[i]);
+        return out;
+      };
+      const raw: Point[] = [
+        ...seg(P, 0, 22),   // Whitefield → Majestic
+        ...seg(G, 16, 0),   // Majestic → Madavara
+        ...seg(G, 0, 31),   // Madavara → Silk Institute
+        ...seg(G, 31, 23),  // Silk Institute → RV Road
+        ...seg(Y, 0, 15),   // RV Road → Bommasandra
+        ...seg(Y, 15, 0),   // Bommasandra → RV Road
+        ...seg(G, 23, 16),  // RV Road → Majestic
+        ...seg(P, 22, 36),  // Majestic → Challaghatta
+        ...seg(P, 36, 22),  // Challaghatta → Majestic
+        ...seg(P, 22, 0),   // Majestic → Whitefield
+      ];
+      // drop the duplicate vertex each join repeats, then the wrap-around dup
+      const pts = raw.filter((p, i) => i === 0 || p[0] !== raw[i - 1][0] || p[1] !== raw[i - 1][1]);
+      const f = pts[0], l = pts[pts.length - 1];
+      if (pts.length > 1 && f[0] === l[0] && f[1] === l[1]) pts.pop();
+      return buildGeometry(roundCorners(pts, 18), true);
+    })();
 
     const elevAt = (li: number, d: number): number => {
       for (const [a, b] of lines[li].ranges) {
@@ -448,6 +485,45 @@ export default function MetroMap3D() {
       return [0, 1].map(() => Array.from({ length: L.pool }, mkTrain));
     });
 
+    /* ---------- the tour train ----------
+       Amber livery, three coaches, always on scene. Built inline (the scheduled
+       builder is per-line-colour) but from the same shared geometry. */
+    const tourCabMat = new THREE.MeshLambertMaterial({ color: TOUR_COLOR, emissive: new THREE.Color(TOUR_COLOR), emissiveIntensity: 0 });
+    cabMats.push(tourCabMat);
+    const tourTrain: TrainRt = (() => {
+      const group = new THREE.Group();
+      const coaches: THREE.Object3D[] = [];
+      for (let ci = 0; ci < TOUR_COACHES; ci++) {
+        const lead = ci === 0;
+        const c = new THREE.Group();
+        const bodyMat = new THREE.MeshLambertMaterial({ color: 0xc9cdd3, emissive: new THREE.Color(0xfff4d6), emissiveIntensity: 0 });
+        bodyMats.push({ mat: bodyMat, base: new THREE.Color(0xc9cdd3) });
+        c.add(new THREE.Mesh(bodyGeo, bodyMat));
+        const roof = new THREE.Mesh(roofGeo, roofMat); roof.position.y = 1.55; c.add(roof);
+        [-1.1, 2.1].forEach(x => { const ac = new THREE.Mesh(acGeo, acMat); ac.position.set(x, 2.15, 0); c.add(ac); });
+        const skirt = new THREE.Mesh(skirtGeo, skirtMat); skirt.position.y = -1.6; c.add(skirt);
+        const stripe = new THREE.Mesh(stripeGeo, tourCabMat); stripe.position.y = -0.35; c.add(stripe);
+        const winMat = new THREE.MeshLambertMaterial({ color: 0x0e1626, emissive: new THREE.Color(0xfff4d6), emissiveIntensity: 0 });
+        windowMats.push(winMat);
+        const win = new THREE.Mesh(windowGeo, winMat); win.position.y = 0.42; c.add(win);
+        if (ci < TOUR_COACHES - 1) { const bel = new THREE.Mesh(bellowsGeo, bellowsMat); bel.position.set(-4.85, -0.1, 0); c.add(bel); }
+        if (lead) {
+          const nose = new THREE.Mesh(noseGeo, tourCabMat); nose.position.x = 4.1; c.add(nose);
+          const wind = new THREE.Mesh(windshieldGeo, windshieldMat); wind.position.set(4.35, 0.55, 0); c.add(wind);
+          const dst = new THREE.Mesh(destGeo, destMat); dst.position.set(4.55, 1.15, 0); c.add(dst);
+          [-1.55, 1.55].forEach(z => { const hl = new THREE.Mesh(cornerGeo, cornerMat); hl.position.set(4.78, -0.7, z); c.add(hl); });
+        }
+        coaches.push(c); group.add(c);
+      }
+      const light = new THREE.Mesh(headlightGeo, headlightMat);
+      coaches[0].add(light);
+      scene.add(group);
+      const rt: TrainRt = { group, coaches, light };
+      group.userData.rt = rt;
+      rideTargets.push(group);
+      return rt;
+    })();
+
     /* ---------- ride the cab ----------
        Click a train to ride in its front cab; the camera locks to the lead
        coach and looks down the line, so it travels the whole route on the
@@ -475,6 +551,7 @@ export default function MetroMap3D() {
       setRiding(false);
     };
     exitRideRef.current = exitRide;
+    boardTourRef.current = () => boardTrain(tourTrain);
 
     let downX = 0, downY = 0;
     const onDown = (e: PointerEvent) => { downX = e.clientX; downY = e.clientY; };
@@ -529,8 +606,9 @@ export default function MetroMap3D() {
     const frame = () => {
       const now = Date.now() / 1000;
       const wallDate = new Date();
-      // Lead-coach pose of the ridden train, captured while it is positioned.
-      let rideCap: { li: number; x: number; y: number; z: number; heading: number; cd: number; dir: number } | null = null;
+      // Camera pose for the ridden train (cab position + look target), computed
+      // while the lead coach is placed — works for any train, line or tour.
+      let rideCap: { camX: number; camY: number; camZ: number; tx: number; ty: number; tz: number } | null = null;
 
       lines.forEach((L, li) => {
         const headway = currentHeadway(L.cfg, wallDate);
@@ -570,30 +648,55 @@ export default function MetroMap3D() {
               euler.set(0, -heading, pitch);
               c.setRotationFromEuler(euler);
               if (ridden && t === ridden && ci === 0) {
-                rideCap = { li, x: p.x + nx * off, y, z: p.y + nz * off, heading, cd, dir };
+                const fx = Math.cos(heading), fz = Math.sin(heading);
+                const aheadD = cd + (dir ? -1 : 1) * 70;
+                const ap = L.geo.posAtExt(aheadD);
+                const arad = ap.angle * Math.PI / 180 + (dir ? Math.PI : 0);
+                const anx = Math.sin(arad), anz = -Math.cos(arad);
+                rideCap = {
+                  camX: p.x + nx * off + fx * 5.6, camY: y + 2.1, camZ: p.y + nz * off + fz * 5.6,
+                  tx: ap.x + anx * TRACK_OFFSET,
+                  ty: elevAt(li, Math.max(0, Math.min(L.geo.total, aheadD))) + 3.4 + 1.4,
+                  tz: ap.y + anz * TRACK_OFFSET,
+                };
               }
             }
           }
         }
       });
 
+      // Tour train — a continuous cruise around the whole-network loop, 24/7
+      // (no service clock, no dwell). Always on scene and always rideable.
+      {
+        const total = tourGeo.total;
+        const base = ((now * TOUR_SPEED) % total + total) % total;
+        for (let ci = 0; ci < tourTrain.coaches.length; ci++) {
+          const cd = base - ci * COACH_SPACING;   // coaches trail the lead
+          const p = tourGeo.posAtExt(cd);
+          const rad = p.angle * Math.PI / 180;
+          const nx = Math.sin(rad), nz = -Math.cos(rad);
+          const c = tourTrain.coaches[ci];
+          c.position.set(p.x + nx * TRACK_OFFSET, EL + 3.4, p.y + nz * TRACK_OFFSET);
+          euler.set(0, -rad, 0);
+          c.setRotationFromEuler(euler);
+          if (ridden === tourTrain && ci === 0) {
+            const fx = Math.cos(rad), fz = Math.sin(rad);
+            const ap = tourGeo.posAtExt(cd + 70);
+            const arad = ap.angle * Math.PI / 180;
+            const anx = Math.sin(arad), anz = -Math.cos(arad);
+            rideCap = {
+              camX: p.x + nx * TRACK_OFFSET + fx * 5.6, camY: EL + 3.4 + 2.1, camZ: p.y + nz * TRACK_OFFSET + fz * 5.6,
+              tx: ap.x + anx * TRACK_OFFSET, ty: EL + 3.4 + 1.4, tz: ap.y + anz * TRACK_OFFSET,
+            };
+          }
+        }
+      }
+
       if (ridden) {
         if (rideCap) {
-          const { li, x, y, z, heading, cd, dir } = rideCap;
-          const geo = lines[li].geo;
-          // Perch just above and ahead of the lead cab, looking down the line —
-          // a driver's-eye view with only a sliver of the nose in frame.
-          const fx = Math.cos(heading), fz = Math.sin(heading);
-          const desired = tmpV.set(x + fx * 5.6, y + 2.1, z + fz * 5.6);
-          camera.position.lerp(desired, 0.5);
-          lastRidePos.copy(desired);
-          // look down the track ahead — follows curves and tunnel ramps
-          const ahead = cd + (dir ? -1 : 1) * 70;
-          const ap = geo.posAtExt(ahead);
-          const ah = ap.angle * Math.PI / 180 + (dir ? Math.PI : 0);
-          const anx = Math.sin(ah), anz = -Math.cos(ah);
-          const ty = elevAt(li, Math.max(0, Math.min(geo.total, ahead))) + 3.4 + 1.4;
-          camera.lookAt(ap.x + anx * TRACK_OFFSET, ty, ap.y + anz * TRACK_OFFSET);
+          camera.position.lerp(tmpV.set(rideCap.camX, rideCap.camY, rideCap.camZ), 0.5);
+          lastRidePos.copy(tmpV);
+          camera.lookAt(rideCap.tx, rideCap.ty, rideCap.tz);
         } else {
           // the ridden train finished its run (faded out) — hand back to orbit
           exitRide();
@@ -648,10 +751,15 @@ export default function MetroMap3D() {
         2D map
       </Link>
 
-      {riding && (
+      {riding ? (
         <button className="m3d-pill m3d-exit" onClick={() => exitRideRef.current()}>
           <X size={13} weight="bold" />
           Exit ride
+        </button>
+      ) : (
+        <button className="m3d-pill m3d-tour" onClick={() => boardTourRef.current()}>
+          <Train size={14} weight="bold" />
+          Ride the tour
         </button>
       )}
 
