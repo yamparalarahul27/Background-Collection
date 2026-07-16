@@ -38,7 +38,15 @@
 .line-glow { opacity: 0; pointer-events: none; transition: opacity 600ms ease; }
 .night .line-glow { opacity: 0.06; }
 .line-grp.dimmed .line-path,
+.line-grp.dimmed .track-rail,
+.line-grp.dimmed .track-sleeper,
 .line-grp.dimmed .line-glow { opacity: 0.1 !important; }
+/* track detailing — dark ties, bright steel rails; both sit inside the deck
+   so they melt into the coloured line when zoomed out */
+.track-sleeper { opacity: 0.32; pointer-events: none; transition: opacity 400ms ease; }
+.night .track-sleeper { opacity: 0.5; }
+.track-rail { opacity: 0.55; pointer-events: none; transition: opacity 400ms ease; }
+.night .track-rail { opacity: 0.28; }
 
 /* ---------- trains ---------- */
 /* dimming uses filter so it composes with the per-train opacity the
@@ -52,6 +60,18 @@
 @keyframes nmWinFlicker { 0%, 100% { opacity: 0.85; } 50% { opacity: 0.95; } }
 .train-headlamp { opacity: 0; transition: opacity 600ms ease; }
 .night .train-headlamp { opacity: 0.35; }
+/* railcar detailing — roof edge highlight, dark roof walkway, metal AC boxes,
+   front windshield. Line colour stays as livery in both themes. */
+.coach-body { fill: #d3d6db; stroke: rgba(255, 255, 255, 0.6); stroke-width: 0.35;
+  transition: fill 600ms ease, stroke 600ms ease; }
+.night .coach-body { fill: #646a79; stroke: rgba(255, 255, 255, 0.14); }
+.coach-stripe { transition: opacity 600ms ease; }
+.coach-roof { fill: rgba(0, 0, 0, 0.22); transition: fill 600ms ease; }
+.night .coach-roof { fill: rgba(0, 0, 0, 0.42); }
+.coach-ac { fill: rgba(255, 255, 255, 0.55); transition: fill 600ms ease; }
+.night .coach-ac { fill: rgba(210, 220, 235, 0.28); }
+.coach-windshield { fill: rgba(12, 22, 42, 0.5); transition: fill 600ms ease; }
+.night .coach-windshield { fill: rgba(255, 244, 214, 0.5); }
 
 /* ---------- twilight (dawn/dusk) ---------- */
 .twilight-overlay {
@@ -80,6 +100,16 @@
 .station-group.dimmed { opacity: 0.12; }
 .station-mask { fill: #ffffff; transition: fill 600ms ease; }
 .night .station-mask { fill: #0a0e1a; }
+/* realistic station: concrete side platforms + a foot-over-bridge concourse.
+   The bridge is translucent so a dwelling train still shows through. */
+.stn-platform { fill: #efece6; stroke-width: 0.6; transition: fill 600ms ease; }
+.night .stn-platform { fill: #263149; }
+.stn-bridge { fill: #e2ddd4; opacity: 0.9; stroke: rgba(0, 0, 0, 0.12); stroke-width: 0.4;
+  transition: fill 600ms ease, opacity 600ms ease; }
+.night .stn-bridge { fill: #1b2333; opacity: 0.78; stroke: rgba(255, 255, 255, 0.1); }
+.is-ug .stn-platform, .is-ug .stn-bridge { opacity: 0.5; }
+.station-group:hover .stn-platform { fill: #ffffff; }
+.night .station-group:hover .stn-platform { fill: #32405c; }
 .station-marker { fill: #ffffff; transition: fill 600ms ease, stroke 600ms ease, opacity 600ms ease; }
 .night .station-marker { fill: #0a0e1a; opacity: 0.85; }
 .pill-bg { stroke: #333333; }

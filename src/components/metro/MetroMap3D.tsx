@@ -202,9 +202,79 @@ export default function MetroMap3D() {
     });
     scene.add(pillars);
 
-    /* ---------- stations (platforms + labels) ---------- */
+    /* ---------- viaduct deck (concrete girder + parapet + yellow edge line) ----------
+       A strip is a triangle-ribbon swept along a line: ptsFn returns the two
+       edge vertices per sample. Only built where the line is elevated. */
+    const DECK_HALF = 6.5, PARAPET_H = 1.7, DECK_DROP = 1.2;
+    const deckMat = new THREE.MeshLambertMaterial({ color: 0xd7d4cc, side: THREE.DoubleSide });
+    const parapetMat = new THREE.MeshLambertMaterial({ color: 0xc4c1b8, side: THREE.DoubleSide });
+    const yellowMat = new THREE.MeshBasicMaterial({ color: 0xf0c000, side: THREE.DoubleSide });
+    const buildStrip = (
+      li: number,
+      ptsFn: (d: number, p: { x: number; y: number; angle: number }, nx: number, nz: number)
+        => [[number, number, number], [number, number, number]],
+      mat: THREE.Material,
+    ) => {
+      const geo = lines[li].geo;
+      const positions: number[] = [];
+      const indices: number[] = [];
+      const step = 6;
+      const n = Math.ceil(geo.total / step);
+      let pair = 0;      // count of vertex-pairs pushed
+      let prev = -1;     // pair index of the previous *contiguous* elevated sample
+      for (let i = 0; i <= n; i++) {
+        const d = Math.min(i * step, geo.total - 0.01);
+        if (elevAt(li, d) < EL - 0.5) { prev = -1; continue; } // break the ribbon over tunnels
+        const p = geo.posAt(d);
+        const rad = p.angle * Math.PI / 180;
+        const [a, b] = ptsFn(d, p, Math.sin(rad), -Math.cos(rad));
+        positions.push(a[0], a[1], a[2], b[0], b[1], b[2]);
+        if (prev >= 0) {
+          const k = prev * 2, c = pair * 2;
+          indices.push(k, k + 1, c, k + 1, c + 1, c);
+        }
+        prev = pair;
+        pair++;
+      }
+      if (pair < 2) return;
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      g.setIndex(indices);
+      g.computeVertexNormals();
+      scene.add(new THREE.Mesh(g, mat));
+    };
+    lines.forEach((_, li) => {
+      const deckY = (d: number) => elevAt(li, d) - DECK_DROP;
+      // deck surface
+      buildStrip(li, (d, p, nx, nz) => [
+        [p.x + nx * DECK_HALF, deckY(d), p.y + nz * DECK_HALF],
+        [p.x - nx * DECK_HALF, deckY(d), p.y - nz * DECK_HALF],
+      ], deckMat);
+      // parapet walls (vertical) + yellow safety line, both edges
+      for (const sgn of [1, -1]) {
+        buildStrip(li, (d, p, nx, nz) => {
+          const ex = p.x + nx * DECK_HALF * sgn, ez = p.y + nz * DECK_HALF * sgn;
+          return [[ex, deckY(d), ez], [ex, deckY(d) + PARAPET_H, ez]];
+        }, parapetMat);
+        buildStrip(li, (d, p, nx, nz) => {
+          const ex = p.x + nx * DECK_HALF * sgn, ez = p.y + nz * DECK_HALF * sgn;
+          const ix = p.x + nx * (DECK_HALF - 0.7) * sgn, iz = p.y + nz * (DECK_HALF - 0.7) * sgn;
+          const ty = deckY(d) + PARAPET_H;
+          return [[ex, ty, ez], [ix, ty, iz]];
+        }, yellowMat);
+      }
+    });
+
+    /* ---------- stations (platforms + canopies + labels) ---------- */
     const platformMats: THREE.MeshLambertMaterial[] = [];
     const sprites: THREE.Sprite[] = [];
+    // Unit barrel-vault (radius 1, length 1) — scaled per station. Arch springs
+    // at local Y=0 and peaks at Y=1; axis runs along the track (local X).
+    const canopyGeo = new THREE.CylinderGeometry(1, 1, 1, 20, 1, true, 0, Math.PI);
+    canopyGeo.rotateZ(Math.PI / 2);
+    const columnGeo = new THREE.CylinderGeometry(0.7, 0.7, 1, 8);
+    const canopyMat = new THREE.MeshLambertMaterial({ color: 0x8fb4d6, transparent: true, opacity: 0.9, side: THREE.DoubleSide });
+    const columnMat = new THREE.MeshLambertMaterial({ color: 0xb9bdc5 });
     stationMap.forEach(s => {
       const li = lineData.findIndex(ld => ld.cfg.id === [...s.lines][0]);
       const d = lines[li].geo.distanceOf(s.x, s.y);
@@ -255,28 +325,109 @@ export default function MetroMap3D() {
         scene.add(sp);
         sprites.push(sp);
       }
+
+      // Elevated stations get a curved canopy on columns (skip underground).
+      if (!s.underground) {
+        const len = w * 1.05, rad = dep / 2 + 0.8, colH = 6.5;
+        const grp = new THREE.Group();
+        grp.position.set(s.x, 0, s.y);
+        grp.rotation.y = -ang;
+        const canopy = new THREE.Mesh(canopyGeo, canopyMat);
+        canopy.scale.set(len, rad, rad);
+        canopy.position.y = y + colH;
+        grp.add(canopy);
+        for (const cx of [-len / 2 + 2.5, len / 2 - 2.5]) {
+          for (const cz of [-rad + 1.2, rad - 1.2]) {
+            const col = new THREE.Mesh(columnGeo, columnMat);
+            col.scale.y = colH;
+            col.position.set(cx, y + colH / 2, cz);
+            grp.add(col);
+          }
+        }
+        scene.add(grp);
+      }
     });
 
-    /* ---------- trains ---------- */
-    const coachGeo = new THREE.BoxGeometry(8, 4.6, 5.2);
+    /* ---------- trains ----------
+       Each coach is a small group: body + curved-step roof with AC units,
+       a dark window band (glows warm at night), an underframe skirt, and —
+       on the lead car — a tapered nose, windshield and headlight beam. */
+    const bodyGeo = new THREE.BoxGeometry(8, 3.0, 4.6);
+    const roofGeo = new THREE.BoxGeometry(7.5, 0.8, 3.9);
+    const stripeGeo = new THREE.BoxGeometry(8.04, 0.5, 4.66);   // belt-line livery stripe
+    const acGeo = new THREE.BoxGeometry(2.0, 0.6, 1.7);
+    const skirtGeo = new THREE.BoxGeometry(7.9, 0.9, 4.3);
+    const windowGeo = new THREE.BoxGeometry(7.0, 1.05, 4.72);
+    const bellowsGeo = new THREE.BoxGeometry(1.7, 2.4, 3.4);    // gangway between coaches
+    const windshieldGeo = new THREE.BoxGeometry(0.5, 1.4, 3.4);
+    const destGeo = new THREE.BoxGeometry(0.3, 0.5, 2.2);       // lit destination board
+    const cornerGeo = new THREE.BoxGeometry(0.3, 0.5, 0.55);    // corner headlights
+    // Tapered, bulbous nose — pinch the +X face of a short box inward.
+    const noseGeo = new THREE.BoxGeometry(1.9, 3.0, 4.6);
+    {
+      const pos = noseGeo.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        if (pos.getX(i) > 0.94) { pos.setY(i, pos.getY(i) * 0.62); pos.setZ(i, pos.getZ(i) * 0.55); }
+      }
+      pos.needsUpdate = true;
+      noseGeo.computeVertexNormals();
+    }
     const headlightGeo = new THREE.ConeGeometry(3.2, 16, 12, 1, true);
     headlightGeo.rotateZ(Math.PI / 2); // point along +X
     headlightGeo.translate(12, 0, 0);
+
+    // Shared materials — stainless-steel livery (silver body, dark trim).
+    const roofMat = new THREE.MeshLambertMaterial({ color: 0xaab0b8 });
+    const acMat = new THREE.MeshLambertMaterial({ color: 0x3a4150 });
+    const skirtMat = new THREE.MeshLambertMaterial({ color: 0x23272f });
+    const bellowsMat = new THREE.MeshLambertMaterial({ color: 0x191d25 });
+    const windshieldMat = new THREE.MeshLambertMaterial({ color: 0x0c1526 });
+    const destMat = new THREE.MeshBasicMaterial({ color: 0xfff2cc });
+    const cornerMat = new THREE.MeshBasicMaterial({ color: 0xfff6e0 });
     const headlightMat = new THREE.MeshBasicMaterial({
       color: 0xfff3c4, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false,
     });
 
-    interface TrainRt { group: THREE.Group; coaches: THREE.Mesh[]; light: THREE.Mesh }
+    interface TrainRt { group: THREE.Group; coaches: THREE.Object3D[]; light: THREE.Mesh }
     const bodyMats: { mat: THREE.MeshLambertMaterial; base: THREE.Color }[] = [];
+    const windowMats: THREE.MeshLambertMaterial[] = [];
+    const cabMats: THREE.MeshLambertMaterial[] = [];
     const trainPools: TrainRt[][][] = lines.map(L => {
+      // Line colour lives on the cab nose + belt-line stripe (faint glow at night
+      // so the line stays identifiable). Registered for the theme toggle.
+      const cabMat = new THREE.MeshLambertMaterial({ color: L.cfg.color, emissive: new THREE.Color(L.cfg.color), emissiveIntensity: 0 });
+      cabMats.push(cabMat);
+      const buildCoach = (ci: number, total: number): THREE.Group => {
+        const lead = ci === 0;
+        const c = new THREE.Group();
+        const bodyMat = new THREE.MeshLambertMaterial({ color: 0xc9cdd3, emissive: new THREE.Color(0xfff4d6), emissiveIntensity: 0 });
+        bodyMats.push({ mat: bodyMat, base: new THREE.Color(0xc9cdd3) });
+        c.add(new THREE.Mesh(bodyGeo, bodyMat));
+        const roof = new THREE.Mesh(roofGeo, roofMat); roof.position.y = 1.55; c.add(roof);
+        [-1.1, 2.1].forEach(x => { const ac = new THREE.Mesh(acGeo, acMat); ac.position.set(x, 2.15, 0); c.add(ac); });
+        const skirt = new THREE.Mesh(skirtGeo, skirtMat); skirt.position.y = -1.6; c.add(skirt);
+        const stripe = new THREE.Mesh(stripeGeo, cabMat); stripe.position.y = -0.35; c.add(stripe);
+        const winMat = new THREE.MeshLambertMaterial({ color: 0x0e1626, emissive: new THREE.Color(0xfff4d6), emissiveIntensity: 0 });
+        windowMats.push(winMat);
+        const win = new THREE.Mesh(windowGeo, winMat); win.position.y = 0.42; c.add(win);
+        // gangway bellows reaching toward the following coach
+        if (ci < total - 1) {
+          const bel = new THREE.Mesh(bellowsGeo, bellowsMat); bel.position.set(-4.85, -0.1, 0); c.add(bel);
+        }
+        if (lead) {
+          const nose = new THREE.Mesh(noseGeo, cabMat); nose.position.x = 4.1; c.add(nose);
+          const wind = new THREE.Mesh(windshieldGeo, windshieldMat); wind.position.set(4.35, 0.55, 0); c.add(wind);
+          const dest = new THREE.Mesh(destGeo, destMat); dest.position.set(4.55, 1.15, 0); c.add(dest);
+          [-1.55, 1.55].forEach(z => { const hl = new THREE.Mesh(cornerGeo, cornerMat); hl.position.set(4.78, -0.7, z); c.add(hl); });
+        }
+        return c;
+      };
       const mkTrain = (): TrainRt => {
         const group = new THREE.Group();
         group.visible = false;
-        const coaches: THREE.Mesh[] = [];
+        const coaches: THREE.Object3D[] = [];
         for (let ci = 0; ci < L.cfg.coaches; ci++) {
-          const mat = new THREE.MeshLambertMaterial({ color: L.cfg.color, emissive: new THREE.Color(0xfff4d6), emissiveIntensity: 0 });
-          bodyMats.push({ mat, base: new THREE.Color(L.cfg.color) });
-          const c = new THREE.Mesh(coachGeo, mat);
+          const c = buildCoach(ci, L.cfg.coaches);
           coaches.push(c);
           group.add(c);
         }
@@ -300,7 +451,9 @@ export default function MetroMap3D() {
       pillarMat.color.set(T.pillar);
       platformMats.forEach(m => m.color.set(T.platform));
       trackMats.forEach(({ mat, base }) => mat.color.copy(base).multiplyScalar(T.trackMul));
-      bodyMats.forEach(({ mat }) => { mat.emissiveIntensity = T.emissive; });
+      bodyMats.forEach(({ mat }) => { mat.emissiveIntensity = n ? 0.06 : 0; });
+      windowMats.forEach(m => { m.emissiveIntensity = n ? 0.95 : 0; });
+      cabMats.forEach(m => { m.emissiveIntensity = n ? 0.4 : 0; });
       headlightMat.opacity = n ? 0.22 : 0;
     };
     applyThemeRef.current = applyTheme;
@@ -399,7 +552,7 @@ export default function MetroMap3D() {
       />
       <div ref={hostRef} className="metro3d-canvas" />
 
-      <a className="m3d-pill m3d-back" href="/bangalore-metro">
+      <a className="m3d-pill m3d-back" href="/">
         <ArrowLeft size={13} weight="bold" />
         2D map
       </a>
