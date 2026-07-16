@@ -42,7 +42,7 @@ export interface Profile {
   endDist: number;
 }
 
-export function buildProfile(stationDists: number[]): Profile {
+export function buildProfile(stationDists: number[], dwell: number = DWELL): Profile {
   // Guard monotonicity — projection glitches must not create negative gaps.
   const dists: number[] = [];
   for (const d of stationDists) dists.push(dists.length ? Math.max(d, dists[dists.length - 1]) : d);
@@ -58,8 +58,8 @@ export function buildProfile(stationDists: number[]): Profile {
     events.push({ type: 'run', t0: t, t1: t + dur, d0: dists[i], d1: dists[i + 1] });
     t += dur;
     if (i < dists.length - 2) {
-      events.push({ type: 'dwell', t0: t, t1: t + DWELL, d0: dists[i + 1], d1: dists[i + 1] });
-      t += DWELL;
+      events.push({ type: 'dwell', t0: t, t1: t + dwell, d0: dists[i + 1], d1: dists[i + 1] });
+      t += dwell;
     }
   }
   return { events, total: t, startDist: dists[0] ?? 0, endDist: dists[dists.length - 1] ?? 0 };

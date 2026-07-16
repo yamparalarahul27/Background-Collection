@@ -15,12 +15,12 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ArrowCounterClockwise, ArrowLeft, Moon, Sun, Train, X } from '@phosphor-icons/react';
+import { ArrowCounterClockwise, ArrowLeft, Moon, SpeakerSimpleHigh, SpeakerSimpleSlash, Sun, Train, X } from '@phosphor-icons/react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { lineData, buildStationMap, TUNNELS, MAP_CX, MAP_CY, type Point } from '@/metro/data';
 import { buildGeometry, roundCorners, type Geometry } from '@/metro/geometry';
-import { buildProfile, currentHeadway, poolSize, trainStateAt, returnPhase, turnaroundSlideDelay, BOARD_VIS, COMPRESS, istHour, SERVICE_START, SERVICE_END, isPeak, autoNight, twilightStrength, type Profile } from '@/metro/service';
+import { buildProfile, distAt, currentHeadway, poolSize, trainStateAt, returnPhase, turnaroundSlideDelay, BOARD_VIS, COMPRESS, istHour, SERVICE_START, SERVICE_END, isPeak, autoNight, twilightStrength, type Profile } from '@/metro/service';
 
 const EL = 16;        // viaduct height
 const UG = -14;       // tunnel depth
@@ -28,10 +28,9 @@ const RAMP = 80;      // portal ramp length along the track
 const TRACK_OFFSET = 4;
 const TRACK_W = 2.2;
 const COACH_SPACING = 9.7;
-/** The 24/7 sightseeing service — a distinct amber livery, a gentle cruise
-    (map-units per real second), and its own coach count. */
+/** The 24/7 sightseeing service — a distinct amber livery and its own
+    coach count; it rides on a station-stopping profile like the real lines. */
 const TOUR_COLOR = '#F5A623';
-const TOUR_SPEED = 34;
 const TOUR_COACHES = 3;
 
 const DAY = {
@@ -62,6 +61,8 @@ export default function MetroMap3D() {
   const exitRideRef = useRef<() => void>(() => {});
   const boardTourRef = useRef<() => void>(() => {});
   const [riding, setRiding] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const mutedRef = useRef(false);
   const [svcNow, setSvcNow] = useState<Date | null>(null);
 
   const clockH = svcNow ? istHour(svcNow) : null;
@@ -81,6 +82,8 @@ export default function MetroMap3D() {
     nightRef.current = night;
     applyThemeRef.current(night);
   }, [night]);
+
+  useEffect(() => { mutedRef.current = muted; }, [muted]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -111,7 +114,7 @@ export default function MetroMap3D() {
     // interchanges (Majestic, RV Road) so a single train can tour the whole
     // network. Joins land on shared interchange/terminus coordinates, so the
     // polyline is continuous; termini become natural turnarounds.
-    const tourGeo = (() => {
+    const tourData = (() => {
       const P = lineData[0].points, G = lineData[1].points, Y = lineData[2].points;
       const seg = (arr: Point[], a: number, b: number): Point[] => {
         const out: Point[] = [];
@@ -135,8 +138,39 @@ export default function MetroMap3D() {
       const pts = raw.filter((p, i) => i === 0 || p[0] !== raw[i - 1][0] || p[1] !== raw[i - 1][1]);
       const f = pts[0], l = pts[pts.length - 1];
       if (pts.length > 1 && f[0] === l[0] && f[1] === l[1]) pts.pop();
-      return buildGeometry(roundCorners(pts, 18), true);
+      const geo = buildGeometry(roundCorners(pts, 18), true);
+
+      // Each dedup'd vertex is a station the tour calls at (a station may recur
+      // when the loop retraces track). Recover its arc-distance by marching a
+      // sampled cursor forward, so repeated visits get distinct, ordered stops.
+      const total = geo.total, STEP = 4;
+      const samp: { d: number; x: number; y: number }[] = [];
+      for (let d = 0; d < total; d += STEP) { const p = geo.posAt(d); samp.push({ d, x: p.x, y: p.y }); }
+      const d2 = (i: number, s: Point) => {
+        const dx = samp[i].x - s[0], dy = samp[i].y - s[1]; return dx * dx + dy * dy;
+      };
+      // For each station in visiting order, march forward to the *local* closest
+      // sample (approach, then recede) — a global min would leap to another pass
+      // of the same track and scramble the ordering.
+      const stops: number[] = [];
+      let si = 0;
+      for (const s of pts) {
+        let k = si, prev = d2(k, s);
+        while (k + 1 < samp.length) {
+          const nd = d2(k + 1, s);
+          if (nd > prev) break;
+          prev = nd; k++;
+        }
+        stops.push(samp[k].d); si = k;
+      }
+      stops[0] = 0;
+      if (stops[stops.length - 1] < total - STEP) stops.push(total); // close the loop
+      // A longer dwell than the scheduled services — a tour lingers at stations.
+      return { geo, profile: buildProfile(stops, 1.6) };
     })();
+    const tourGeo = tourData.geo;
+    const tourProfile = tourData.profile;
+    const tourPeriod = tourProfile.total || 1;
 
     const elevAt = (li: number, d: number): number => {
       for (const [a, b] of lines[li].ranges) {
@@ -534,15 +568,69 @@ export default function MetroMap3D() {
     const raycaster = new THREE.Raycaster();
     const ndc = new THREE.Vector2();
 
+    /* ---------- running sound ----------
+       A synthesized traction rumble (looping brown noise through a low-pass
+       plus a low sine hum), its volume + brightness tracking the train's
+       speed, so it swells pulling away and fades to near-silence braking into
+       a station. Built lazily inside a board gesture (autoplay policy). */
+    let actx: AudioContext | null = null;
+    let master: GainNode | null = null, rumble: BiquadFilterNode | null = null;
+    const ensureAudio = () => {
+      if (actx) return;
+      try { actx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)(); }
+      catch { actx = null; return; }
+      const len = actx.sampleRate * 2;
+      const buf = actx.createBuffer(1, len, actx.sampleRate);
+      const data = buf.getChannelData(0);
+      let last = 0;
+      for (let i = 0; i < len; i++) { const w = Math.random() * 2 - 1; last = (last + 0.02 * w) / 1.02; data[i] = last * 3.5; }
+      const src = actx.createBufferSource(); src.buffer = buf; src.loop = true;
+      rumble = actx.createBiquadFilter(); rumble.type = 'lowpass'; rumble.frequency.value = 200;
+      master = actx.createGain(); master.gain.value = 0;
+      const hum = actx.createOscillator(); hum.type = 'sine'; hum.frequency.value = 54;
+      const humGain = actx.createGain(); humGain.gain.value = 0.45;
+      src.connect(rumble).connect(master);
+      hum.connect(humGain).connect(master);
+      master.connect(actx.destination);
+      src.start(); hum.start();
+    };
+    const setRumble = (speed: number) => {
+      if (!actx || !master || !rumble) return;
+      const now = actx.currentTime;
+      if (mutedRef.current || ridden == null) { master.gain.setTargetAtTime(0, now, 0.12); return; }
+      const t = Math.min(1, speed / 42);            // 0 at a standstill, 1 at line speed
+      master.gain.setTargetAtTime(0.02 + t * 0.16, now, 0.09);
+      rumble.frequency.setTargetAtTime(150 + t * 520, now, 0.09);
+    };
+    const chime = () => {                            // soft two-tone arrival
+      if (!actx || mutedRef.current) return;
+      const t0 = actx.currentTime;
+      [[659.25, 0], [523.25, 0.2]].forEach(([f, dt]) => {
+        const o = actx!.createOscillator(), g = actx!.createGain();
+        o.type = 'sine'; o.frequency.value = f;
+        g.gain.setValueAtTime(0, t0 + dt);
+        g.gain.linearRampToValueAtTime(0.05, t0 + dt + 0.03);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + dt + 0.32);
+        o.connect(g).connect(actx!.destination); o.start(t0 + dt); o.stop(t0 + dt + 0.34);
+      });
+    };
+    // Speed estimate + arrival detection for the ridden train.
+    const rideWorld = new THREE.Vector3();
+    let hadRide = false, lastRideT = 0, wasMoving = false;
+
     const boardTrain = (rt: TrainRt) => {
       ridden = rt;
       controls.enabled = false;
       camera.fov = 72; camera.updateProjectionMatrix();
+      hadRide = false; wasMoving = false;
+      ensureAudio();
+      actx?.resume();
       setRiding(true);
     };
     const exitRide = () => {
       if (!ridden) return;
       ridden = null;
+      setRumble(0);
       camera.fov = 50; camera.updateProjectionMatrix();
       // resume the orbit cam framed on where the ride left off
       controls.target.copy(lastRidePos);
@@ -603,6 +691,7 @@ export default function MetroMap3D() {
     let raf = 0;
     const euler = new THREE.Euler(0, 0, 0, 'YZX');
     const tmpV = new THREE.Vector3();
+    const tmpV2 = new THREE.Vector3();
     const frame = () => {
       const now = Date.now() / 1000;
       const wallDate = new Date();
@@ -665,14 +754,15 @@ export default function MetroMap3D() {
         }
       });
 
-      // Tour train — a continuous cruise around the whole-network loop, 24/7
-      // (no service clock, no dwell). Always on scene and always rideable.
+      // Tour train — rides the whole-network loop 24/7 on its own accel/brake +
+      // dwell profile, so it actually stops at every station (and pauses at the
+      // termini it turns back through). No service clock; always rideable.
       {
-        const total = tourGeo.total;
-        const base = ((now * TOUR_SPEED) % total + total) % total;
+        const tt = ((now % tourPeriod) + tourPeriod) % tourPeriod;
+        const base = distAt(tourProfile, tt) ?? tourProfile.startDist;
         for (let ci = 0; ci < tourTrain.coaches.length; ci++) {
           const cd = base - ci * COACH_SPACING;   // coaches trail the lead
-          const p = tourGeo.posAtExt(cd);
+          const p = tourGeo.posAt(cd);
           const rad = p.angle * Math.PI / 180;
           const nx = Math.sin(rad), nz = -Math.cos(rad);
           const c = tourTrain.coaches[ci];
@@ -681,7 +771,7 @@ export default function MetroMap3D() {
           c.setRotationFromEuler(euler);
           if (ridden === tourTrain && ci === 0) {
             const fx = Math.cos(rad), fz = Math.sin(rad);
-            const ap = tourGeo.posAtExt(cd + 70);
+            const ap = tourGeo.posAt(cd + 70);
             const arad = ap.angle * Math.PI / 180;
             const anx = Math.sin(arad), anz = -Math.cos(arad);
             rideCap = {
@@ -697,6 +787,17 @@ export default function MetroMap3D() {
           camera.position.lerp(tmpV.set(rideCap.camX, rideCap.camY, rideCap.camZ), 0.5);
           lastRidePos.copy(tmpV);
           camera.lookAt(rideCap.tx, rideCap.ty, rideCap.tz);
+          // speed (from the cab target's motion) drives the running sound;
+          // a fresh stop rings the arrival chime.
+          tmpV2.set(rideCap.camX, rideCap.camY, rideCap.camZ);
+          if (hadRide) {
+            const speed = rideWorld.distanceTo(tmpV2) / Math.max(1e-3, now - lastRideT);
+            setRumble(speed);
+            const moving = speed > 6;
+            if (wasMoving && !moving) chime();
+            wasMoving = moving;
+          }
+          rideWorld.copy(tmpV2); lastRideT = now; hadRide = true;
         } else {
           // the ridden train finished its run (faded out) — hand back to orbit
           exitRide();
@@ -723,6 +824,7 @@ export default function MetroMap3D() {
       window.removeEventListener('keydown', onKey);
       renderer.domElement.removeEventListener('pointerdown', onDown);
       renderer.domElement.removeEventListener('click', onClick);
+      actx?.close();
       controls.dispose();
       renderer.dispose();
       sprites.forEach(sp => { sp.material.map?.dispose(); sp.material.dispose(); });
@@ -786,6 +888,13 @@ export default function MetroMap3D() {
         </button>
         <button onClick={() => resetViewRef.current()} title="Reset view">
           <ArrowCounterClockwise size={15} weight="bold" />
+        </button>
+        <button
+          onClick={() => setMuted(m => !m)}
+          aria-pressed={muted}
+          title={muted ? 'Unmute train sound' : 'Mute train sound'}
+        >
+          {muted ? <SpeakerSimpleSlash size={15} weight="bold" /> : <SpeakerSimpleHigh size={15} weight="bold" />}
         </button>
       </div>
 
