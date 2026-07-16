@@ -28,10 +28,22 @@ const RAMP = 80;      // portal ramp length along the track
 const TRACK_OFFSET = 4;
 const TRACK_W = 2.2;
 const COACH_SPACING = 9.7;
-/** The 24/7 sightseeing service — a distinct amber livery and its own
-    coach count; it rides on a station-stopping profile like the real lines. */
+/** The 24/7 sightseeing service — a distinct amber livery, a station-stopping
+    profile, and a consist modelled FULLY TO SCALE: a real 6-car Namma rake
+    (~132 m) mapped through the measured ~19 m per map-unit, so its length is
+    true relative to the (accurate) station spacing. (The scheduled trains and
+    the scene furniture stay stylized-large for map legibility.) */
 const TOUR_COLOR = '#F5A623';
-const TOUR_COACHES = 3;
+const TOUR_MU = 19;                        // metres per map-unit (measured)
+const TOUR_COACHES = 6;
+const TOUR_COACH_LEN = 22 / TOUR_MU;       // ~1.16 u  (real coach ~22 m)
+const TOUR_COACH_W = 2.9 / TOUR_MU;        // ~0.15 u
+const TOUR_COACH_H = 3.7 / TOUR_MU;        // ~0.19 u
+const TOUR_SPACING = 22.6 / TOUR_MU;       // ~1.19 u  (coach + coupling)
+const TOUR_RAIL_Y = 0.15;                  // coach centre sits on the rail
+const TOUR_CAM_FWD = 0.55;                 // camera just ahead of the lead nose
+const TOUR_CAM_UP = 0.8;                   // eye height — clears the stylized parapet walls
+const TOUR_TGT_UP = 0.5;                   // look-ahead target height
 
 const DAY = {
   bg: 0xf7f6f3, ground: 0xffffff, grid: 0xe3e1dc, hemi: 0.95, sun: 0.9,
@@ -489,7 +501,7 @@ export default function MetroMap3D() {
       color: 0xfff3c4, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false,
     });
 
-    interface TrainRt { group: THREE.Group; coaches: THREE.Object3D[]; light: THREE.Mesh }
+    interface TrainRt { group: THREE.Group; coaches: THREE.Object3D[]; light?: THREE.Mesh }
     /** Every train group, for click-to-board raycasting (invisible ones are
         skipped automatically by intersectObjects). */
     const rideTargets: THREE.Object3D[] = [];
@@ -546,40 +558,33 @@ export default function MetroMap3D() {
       return [0, 1].map(() => Array.from({ length: L.pool }, mkTrain));
     });
 
-    /* ---------- the tour train ----------
-       Amber livery, three coaches, always on scene. Built inline (the scheduled
-       builder is per-line-colour) but from the same shared geometry. */
+    /* ---------- the tour train (fully to scale) ----------
+       Amber livery, six real-length coaches. At true scale the coaches are tiny
+       (~1.16 u) so the detailed mainline model is dropped for clean little
+       boxes: silver body, dark window band, amber belt-line + nose cap. */
     const tourCabMat = new THREE.MeshLambertMaterial({ color: TOUR_COLOR, emissive: new THREE.Color(TOUR_COLOR), emissiveIntensity: 0 });
     cabMats.push(tourCabMat);
+    const tourBodyGeo = new THREE.BoxGeometry(TOUR_COACH_LEN, TOUR_COACH_H, TOUR_COACH_W);
+    const tourWinGeo = new THREE.BoxGeometry(TOUR_COACH_LEN * 0.8, TOUR_COACH_H * 0.42, TOUR_COACH_W * 1.04);
+    const tourStripeGeo = new THREE.BoxGeometry(TOUR_COACH_LEN * 0.92, TOUR_COACH_H * 0.16, TOUR_COACH_W * 1.06);
+    const tourNoseGeo = new THREE.BoxGeometry(TOUR_COACH_LEN * 0.26, TOUR_COACH_H * 0.94, TOUR_COACH_W * 0.96);
     const tourTrain: TrainRt = (() => {
       const group = new THREE.Group();
       const coaches: THREE.Object3D[] = [];
       for (let ci = 0; ci < TOUR_COACHES; ci++) {
-        const lead = ci === 0;
         const c = new THREE.Group();
-        const bodyMat = new THREE.MeshLambertMaterial({ color: 0xc9cdd3, emissive: new THREE.Color(0xfff4d6), emissiveIntensity: 0 });
-        bodyMats.push({ mat: bodyMat, base: new THREE.Color(0xc9cdd3) });
-        c.add(new THREE.Mesh(bodyGeo, bodyMat));
-        const roof = new THREE.Mesh(roofGeo, roofMat); roof.position.y = 1.55; c.add(roof);
-        [-1.1, 2.1].forEach(x => { const ac = new THREE.Mesh(acGeo, acMat); ac.position.set(x, 2.15, 0); c.add(ac); });
-        const skirt = new THREE.Mesh(skirtGeo, skirtMat); skirt.position.y = -1.6; c.add(skirt);
-        const stripe = new THREE.Mesh(stripeGeo, tourCabMat); stripe.position.y = -0.35; c.add(stripe);
+        const bodyMat = new THREE.MeshLambertMaterial({ color: 0xd0d4da, emissive: new THREE.Color(0xfff4d6), emissiveIntensity: 0 });
+        bodyMats.push({ mat: bodyMat, base: new THREE.Color(0xd0d4da) });
+        c.add(new THREE.Mesh(tourBodyGeo, bodyMat));
         const winMat = new THREE.MeshLambertMaterial({ color: 0x0e1626, emissive: new THREE.Color(0xfff4d6), emissiveIntensity: 0 });
         windowMats.push(winMat);
-        const win = new THREE.Mesh(windowGeo, winMat); win.position.y = 0.42; c.add(win);
-        if (ci < TOUR_COACHES - 1) { const bel = new THREE.Mesh(bellowsGeo, bellowsMat); bel.position.set(-4.85, -0.1, 0); c.add(bel); }
-        if (lead) {
-          const nose = new THREE.Mesh(noseGeo, tourCabMat); nose.position.x = 4.1; c.add(nose);
-          const wind = new THREE.Mesh(windshieldGeo, windshieldMat); wind.position.set(4.35, 0.55, 0); c.add(wind);
-          const dst = new THREE.Mesh(destGeo, destMat); dst.position.set(4.55, 1.15, 0); c.add(dst);
-          [-1.55, 1.55].forEach(z => { const hl = new THREE.Mesh(cornerGeo, cornerMat); hl.position.set(4.78, -0.7, z); c.add(hl); });
-        }
+        const win = new THREE.Mesh(tourWinGeo, winMat); win.position.y = TOUR_COACH_H * 0.08; c.add(win);
+        const stripe = new THREE.Mesh(tourStripeGeo, tourCabMat); stripe.position.y = -TOUR_COACH_H * 0.2; c.add(stripe);
+        if (ci === 0) { const nose = new THREE.Mesh(tourNoseGeo, tourCabMat); nose.position.x = TOUR_COACH_LEN * 0.5; c.add(nose); }
         coaches.push(c); group.add(c);
       }
-      const light = new THREE.Mesh(headlightGeo, headlightMat);
-      coaches[0].add(light);
       scene.add(group);
-      const rt: TrainRt = { group, coaches, light };
+      const rt: TrainRt = { group, coaches };
       group.userData.rt = rt;
       rideTargets.push(group);
       return rt;
@@ -814,11 +819,11 @@ export default function MetroMap3D() {
         const tt = ((now % tourPeriod) + tourPeriod) % tourPeriod;
         const base = distAt(tourProfile, tt) ?? tourProfile.startDist;
         for (let ci = 0; ci < tourTrain.coaches.length; ci++) {
-          const cd = base - ci * COACH_SPACING;   // coaches trail the lead
+          const cd = base - ci * TOUR_SPACING;   // to-scale coaches trail the lead
           const p = tourGeo.posAt(cd);
           const rad = p.angle * Math.PI / 180;
           const nx = Math.sin(rad), nz = -Math.cos(rad);
-          const y = tourElev(cd) + 3.4;
+          const y = tourElev(cd) + TOUR_RAIL_Y;
           // nose down/up the tunnel ramps, from the elevation gradient
           const pitch = -Math.atan2(tourElev(cd + 3) - tourElev(cd - 3), 6);
           const c = tourTrain.coaches[ci];
@@ -831,8 +836,8 @@ export default function MetroMap3D() {
             const arad = ap.angle * Math.PI / 180;
             const anx = Math.sin(arad), anz = -Math.cos(arad);
             rideCap = {
-              camX: p.x + nx * TRACK_OFFSET + fx * 5.6, camY: y + 2.1, camZ: p.y + nz * TRACK_OFFSET + fz * 5.6,
-              tx: ap.x + anx * TRACK_OFFSET, ty: tourElev(cd + 70) + 3.4 + 1.4, tz: ap.y + anz * TRACK_OFFSET,
+              camX: p.x + nx * TRACK_OFFSET + fx * TOUR_CAM_FWD, camY: tourElev(cd) + TOUR_CAM_UP, camZ: p.y + nz * TRACK_OFFSET + fz * TOUR_CAM_FWD,
+              tx: ap.x + anx * TRACK_OFFSET, ty: tourElev(cd + 70) + TOUR_TGT_UP, tz: ap.y + anz * TRACK_OFFSET,
             };
           }
         }
