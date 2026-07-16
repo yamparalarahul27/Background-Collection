@@ -844,12 +844,14 @@ export default function MetroMap() {
                         {/* clerestory side windows (glow warm at night) */}
                         <rect className="train-window" x={-3.4} y={-1.85} width={6.6} height={0.62} rx={0.3} />
                         <rect className="train-window" x={-3.4} y={1.23} width={6.6} height={0.62} rx={0.3} />
-                        {/* line-coloured cab (magenta front, from the photo) */}
+                        {/* line-coloured cab cap — the whole front nose wears the
+                            livery, so the leading end (and travel direction) reads
+                            at a glance even zoomed out */}
                         {lead && (
                           <path className="coach-cab" fill={ld.cfg.color}
-                            d="M 2.5 -2.2 L 2.8 -2.2 Q 4.7 -2.2 4.7 0 Q 4.7 2.2 2.8 2.2 L 2.5 2.2 Z" />
+                            d="M 1.7 -2.2 L 2.8 -2.2 Q 4.7 -2.2 4.7 0 Q 4.7 2.2 2.8 2.2 L 1.7 2.2 Z" />
                         )}
-                        {lead && <rect className="coach-windshield" x={2.7} y={-1.2} width={1.0} height={2.4} rx={0.5} />}
+                        {lead && <rect className="coach-windshield" x={2.75} y={-1.15} width={1.15} height={2.3} rx={0.5} />}
                       </g>
                       );
                     })}
@@ -928,6 +930,13 @@ export default function MetroMap() {
                   );
                 })() : (
                   <g className="stn-plat" transform={`rotate(${angle.toFixed(2)} ${s.x} ${s.y})`}>
+                    {/* cantilever platform roofs — the signature curved canopy over
+                        each side platform. Elevated stations only; underground stops
+                        stay open (no canopy) so the two read differently. */}
+                    {!s.underground && [-1, 1].map(sgn => (
+                      <rect key={`cnp-${sgn}`} className="stn-canopy"
+                        x={s.x - 11} y={s.y + sgn * 7.6 - 2.7} width={22} height={5.4} rx={2.7} />
+                    ))}
                     {/* two side platforms flanking the tracks, edged in line colour */}
                     {[-1, 1].map(sgn => (
                       <rect key={sgn} className="stn-platform"

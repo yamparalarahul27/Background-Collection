@@ -53,7 +53,7 @@
    schedule loop sets inline (boarding/turnaround fades) */
 .train-car { pointer-events: none; transition: filter 500ms cubic-bezier(0.23, 1, 0.32, 1); }
 .train-car.dimmed { filter: opacity(0.07); }
-.train-glow { opacity: 0.08; transition: opacity 600ms ease; }
+.train-glow { opacity: 0.14; transition: opacity 600ms ease; }
 .night .train-glow { opacity: 0.2; }
 .train-window { fill: #ffffff; opacity: 0.45; transition: fill 600ms ease, opacity 600ms ease; }
 .night .train-window { fill: #fff4d6; opacity: 0.85; animation: nmWinFlicker 3s ease-in-out infinite; }
@@ -62,9 +62,9 @@
 .night .train-headlamp { opacity: 0.35; }
 /* railcar detailing — roof edge highlight, dark roof walkway, metal AC boxes,
    front windshield. Line colour stays as livery in both themes. */
-.coach-body { fill: #d3d6db; stroke: rgba(255, 255, 255, 0.6); stroke-width: 0.35;
+.coach-body { fill: #eceef2; stroke: rgba(90, 100, 120, 0.55); stroke-width: 0.4;
   transition: fill 600ms ease, stroke 600ms ease; }
-.night .coach-body { fill: #646a79; stroke: rgba(255, 255, 255, 0.14); }
+.night .coach-body { fill: #8b94a6; stroke: rgba(255, 255, 255, 0.2); }
 .coach-stripe { transition: opacity 600ms ease; }
 .coach-roof { fill: rgba(0, 0, 0, 0.22); transition: fill 600ms ease; }
 .night .coach-roof { fill: rgba(0, 0, 0, 0.42); }
@@ -102,6 +102,13 @@
 .night .station-mask { fill: #0a0e1a; }
 /* realistic station: concrete side platforms + a foot-over-bridge concourse.
    The bridge is translucent so a dwelling train still shows through. */
+/* cantilever platform roof — a soft translucent shell over each platform,
+   drawn behind the deck so the line-coloured platform edge still shows through */
+.stn-canopy { fill: rgba(214, 219, 227, 0.5); stroke: rgba(60, 70, 90, 0.28);
+  stroke-width: 0.35; pointer-events: none; transition: fill 600ms ease, stroke 600ms ease; }
+.night .stn-canopy { fill: rgba(58, 72, 102, 0.42); stroke: rgba(255, 255, 255, 0.12); }
+.station-group:hover .stn-canopy { fill: rgba(224, 230, 240, 0.72); }
+.night .station-group:hover .stn-canopy { fill: rgba(74, 92, 128, 0.6); }
 .stn-platform { fill: #efece6; stroke-width: 0.6; transition: fill 600ms ease; }
 .night .stn-platform { fill: #263149; }
 .stn-bridge { fill: #e2ddd4; opacity: 0.9; stroke: rgba(0, 0, 0, 0.12); stroke-width: 0.4;
