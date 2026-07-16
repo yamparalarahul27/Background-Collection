@@ -39,6 +39,8 @@ const DASH_SPEED = 12;
     px to the left of the direction of travel. */
 const TRACK_OFFSET = 4;
 const TRACK_WIDTH = 2.5;
+/** Half-gauge of the running rails, drawn within each track's deck. */
+const RAIL_GAUGE = 0.85;
 /** Fillet radius for track corners. */
 const CURVE_RADIUS = 18;
 /** Centre-to-centre distance between coaches of a trainset. */
@@ -160,6 +162,18 @@ export default function MetroMap() {
     ]);
   }, [densePts]);
 
+  /** Two running rails per direction, offset a half-gauge either side of each
+      track centreline. Rendered within the coloured deck — a subtle detail
+      that reads as real track once zoomed in. */
+  const railPaths = useMemo<string[][]>(() => {
+    return densePts.map(pts =>
+      [TRACK_OFFSET, -TRACK_OFFSET].flatMap(o => [
+        polylinePathD(offsetPolyline(pts, o + RAIL_GAUGE)),
+        polylinePathD(offsetPolyline(pts, o - RAIL_GAUGE)),
+      ]),
+    );
+  }, [densePts]);
+
   /** Tunnel overlays: a background-coloured band over the corridor between
       the tunnel's end stations (+ portal pad). Trains render underneath, so
       they visibly dim underground and re-emerge at the portals. */
@@ -199,6 +213,19 @@ export default function MetroMap() {
       return m;
     });
   }, [stations, geometries]);
+
+  /** Track heading (deg) at each station — the platform aligns to it. */
+  const stationAngles = useMemo(() => {
+    const m = new Map<string, number>();
+    lineData.forEach((ld, li) => {
+      ld.stations.forEach(sd => {
+        if (m.has(sd.id)) return;
+        const d = stationDists[li].get(sd.id);
+        if (d !== undefined) m.set(sd.id, geometries[li].posAt(d).angle);
+      });
+    });
+    return m;
+  }, [geometries, stationDists]);
 
   const getOrient = useCallback((s: Station): PillOrient => {
     return overrides[s.id]?.orient ?? ORIENT_DEFAULTS[s.id] ??
@@ -713,6 +740,17 @@ export default function MetroMap() {
                   strokeLinecap="round" strokeLinejoin="round"
                   onClick={e => { e.stopPropagation(); setSelectedStation(null); setFocusedLine(li); }} />
               ))}
+              {/* sleepers (cross-ties) — perpendicular ticks within each deck */}
+              {trackPaths[li].map((d, ti) => (
+                <path key={`slp-${ti}`} className="track-sleeper" d={d} fill="none"
+                  stroke="#000" strokeWidth={TRACK_WIDTH - 0.1} strokeLinecap="butt"
+                  strokeDasharray="0.6 2.4" />
+              ))}
+              {/* running rails — two steel lines per direction */}
+              {railPaths[li].map((d, ri) => (
+                <path key={`rail-${ri}`} className="track-rail" d={d} fill="none"
+                  stroke="#fff" strokeWidth={0.4} strokeLinecap="round" />
+              ))}
               {/* buffer-stop bars across the corridor at both ends */}
               {[0.01, geometries[li].total - 0.01].map((d, ei) => {
                 const p = geometries[li].posAt(d);
@@ -780,16 +818,41 @@ export default function MetroMap() {
                       (byLine[dir] ??= [])[slot] = el;
                     }}
                   >
-                    {Array.from({ length: ld.cfg.coaches }, (_, ci) => (
+                    {Array.from({ length: ld.cfg.coaches }, (_, ci) => {
+                      const lead = ci === 0;
+                      return (
                       <g key={ci} className="coach">
-                        {ci === 0 && (
-                          <polygon className="train-headlamp" points="4,-2 38,-8 38,8 4,2" fill="url(#nm-headlamp)" />
+                        {/* soft bloom — invisible by day, warm halo by night */}
+                        <rect className="train-glow" x={-5.2} y={-3} width={10.4} height={6} rx={2.8} fill={ld.cfg.color} />
+                        {lead && (
+                          <polygon className="train-headlamp" points="4.6,-2.1 40,-8 40,8 4.6,2.1" fill="url(#nm-headlamp)" />
                         )}
-                        <rect className="train-glow" x={-6.5} y={-4.5} width={13} height={9} rx={3.5} fill={ld.cfg.color} />
-                        <rect x={-4} y={-2.75} width={8} height={5.5} rx={2} fill={ld.cfg.color} opacity={0.9} />
-                        <rect className="train-window" x={-2.6} y={-1} width={5.2} height={2} rx={1} />
+                        {/* stainless-steel body — lead car gets a tapered nose at +X */}
+                        {lead ? (
+                          <path className="coach-body"
+                            d="M -4.4 -2.2 L 2.8 -2.2 Q 4.7 -2.2 4.7 0 Q 4.7 2.2 2.8 2.2 L -4.4 2.2 Q -5 2.2 -5 1.6 L -5 -1.6 Q -5 -2.2 -4.4 -2.2 Z" />
+                        ) : (
+                          <rect className="coach-body" x={-4.4} y={-2.2} width={8.8} height={4.4} rx={1.3} />
+                        )}
+                        {/* line-coloured belt-line stripes down each side */}
+                        <rect className="coach-stripe" x={-3.7} y={-2.15} width={7.4} height={0.5} rx={0.2} fill={ld.cfg.color} />
+                        <rect className="coach-stripe" x={-3.7} y={1.65} width={7.4} height={0.5} rx={0.2} fill={ld.cfg.color} />
+                        {/* roof-top walkway + AC units */}
+                        <rect className="coach-roof" x={-3.7} y={-0.75} width={7.4} height={1.5} rx={0.5} />
+                        <rect className="coach-ac" x={-2.5} y={-0.55} width={1.5} height={1.1} rx={0.25} />
+                        <rect className="coach-ac" x={1} y={-0.55} width={1.5} height={1.1} rx={0.25} />
+                        {/* clerestory side windows (glow warm at night) */}
+                        <rect className="train-window" x={-3.4} y={-1.85} width={6.6} height={0.62} rx={0.3} />
+                        <rect className="train-window" x={-3.4} y={1.23} width={6.6} height={0.62} rx={0.3} />
+                        {/* line-coloured cab (magenta front, from the photo) */}
+                        {lead && (
+                          <path className="coach-cab" fill={ld.cfg.color}
+                            d="M 2.5 -2.2 L 2.8 -2.2 Q 4.7 -2.2 4.7 0 Q 4.7 2.2 2.8 2.2 L 2.5 2.2 Z" />
+                        )}
+                        {lead && <rect className="coach-windshield" x={2.7} y={-1.2} width={1.0} height={2.4} rx={0.5} />}
                       </g>
-                    ))}
+                      );
+                    })}
                   </g>
                 ))
               )}
@@ -822,6 +885,7 @@ export default function MetroMap() {
             const enLines = s.enLines ?? [s.en];
             const knYExtra = (enLines.length - 1) * 13;
             const devSel = devMode && devSelected === s.id;
+            const angle = stationAngles.get(s.id) ?? 0;
 
             return (
               <g
@@ -831,6 +895,7 @@ export default function MetroMap() {
                   ic ? 'is-xch' : '',
                   isLocal ? 'is-local' : '',
                   terminusColor ? 'is-terminus' : '',
+                  s.underground ? 'is-ug' : '',
                   dimmed ? 'dimmed' : '',
                   devSel ? 'dev-selected' : '',
                 ].filter(Boolean).join(' ')}
@@ -844,6 +909,8 @@ export default function MetroMap() {
                   const cSp = 9;
                   return (
                     <>
+                      {/* interchange building footprint behind the pill */}
+                      <rect className="stn-bridge" x={px - 5} y={py - 5} width={pw + 10} height={ph + 10} rx={rx + 5} />
                       <rect className="station-mask" x={px - 2} y={py - 2} width={pw + 4} height={ph + 4} rx={rx + 2} />
                       <rect className="station-marker pill-bg" x={px} y={py} width={pw} height={ph} rx={rx}
                         strokeWidth={1.5} strokeDasharray={s.underground ? '3 2' : undefined} />
@@ -860,20 +927,26 @@ export default function MetroMap() {
                     </>
                   );
                 })() : (
-                  <>
-                    <rect className="station-mask" x={s.x - 7 - (terminusColor ? 1 : 0)} y={s.y - 7 - (terminusColor ? 1 : 0)}
-                      width={terminusColor ? 16 : 14} height={terminusColor ? 16 : 14} rx={1.5} />
+                  <g className="stn-plat" transform={`rotate(${angle.toFixed(2)} ${s.x} ${s.y})`}>
+                    {/* two side platforms flanking the tracks, edged in line colour */}
+                    {[-1, 1].map(sgn => (
+                      <rect key={sgn} className="stn-platform"
+                        x={s.x - 9.5} y={s.y + sgn * 7.6 - 1.2} width={19} height={2.4} rx={1}
+                        stroke={terminusColor ?? colors[0]}
+                        strokeDasharray={s.underground ? '2 1.4' : undefined} />
+                    ))}
+                    {/* concourse / foot-over-bridge spanning the tracks */}
+                    <rect className="stn-bridge" x={s.x - 1.9} y={s.y - 9} width={3.8} height={18} rx={1.2} />
+                    <rect className="station-warm" x={s.x - 1.5} y={s.y - 8.6} width={3} height={17.2} rx={1} fill="#FFEEBB" />
+                    {/* identity marker on the concourse */}
                     {terminusColor ? (
-                      // Solid line-colored block — the line ends here.
-                      <rect className="station-marker" x={s.x - 6} y={s.y - 6} width={12} height={12} rx={1.2}
-                        stroke="#FFFFFF" strokeWidth={1.5} style={{ fill: terminusColor }} />
+                      <rect className="station-marker" x={s.x - 2.7} y={s.y - 2.7} width={5.4} height={5.4} rx={1}
+                        stroke="#FFFFFF" strokeWidth={1.2} style={{ fill: terminusColor }} />
                     ) : (
-                      <rect className="station-marker" x={s.x - 5} y={s.y - 5} width={10} height={10} rx={0.8}
-                        stroke={colors[0]} strokeWidth={1.5}
-                        strokeDasharray={s.underground ? '2.4 1.7' : undefined} />
+                      <circle className="station-marker" cx={s.x} cy={s.y} r={2.7}
+                        stroke={colors[0]} strokeWidth={1.4} />
                     )}
-                    <rect className="station-warm" x={s.x - 3.5} y={s.y - 3.5} width={7} height={7} rx={0.5} fill="#FFEEBB" />
-                  </>
+                  </g>
                 )}
 
                 <rect className="station-hit" x={s.x - 20} y={s.y - 20} width={40} height={40} fill="transparent" />
@@ -1089,7 +1162,7 @@ export default function MetroMap() {
         >
           {soundOn ? <SpeakerSimpleHigh size={15} weight="bold" /> : <SpeakerSimpleSlash size={15} weight="bold" />}
         </button>
-        <a className="tb-3d" href="/bangalore-metro/3d" title="Open 3D view">
+        <a className="tb-3d" href="/3d" title="Open 3D view">
           <Cube size={14} weight="bold" />
           3D
         </a>
