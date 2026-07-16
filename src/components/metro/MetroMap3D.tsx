@@ -110,6 +110,15 @@ export default function MetroMap3D() {
       return { geo, profile, pool: poolSize(profile, ld.cfg), ranges, cfg: ld.cfg };
     });
 
+    const elevAt = (li: number, d: number): number => {
+      for (const [a, b] of lines[li].ranges) {
+        if (d >= a && d <= b) return UG;
+        if (d >= a - RAMP && d < a) return EL + (UG - EL) * smooth((d - (a - RAMP)) / RAMP);
+        if (d > b && d <= b + RAMP) return UG + (EL - UG) * smooth((d - b) / RAMP);
+      }
+      return EL;
+    };
+
     // Tour loop — one continuous path threading every line through the shared
     // interchanges (Majestic, RV Road) so a single train can tour the whole
     // network. Joins land on shared interchange/terminus coordinates, so the
@@ -165,20 +174,38 @@ export default function MetroMap3D() {
       }
       stops[0] = 0;
       if (stops[stops.length - 1] < total - STEP) stops.push(total); // close the loop
+
+      // Per-sample elevation: project each tour sample onto the nearest real
+      // line and read that line's height, so the tour dips into the very tunnels
+      // (with the same ramps) the scheduled services use.
+      const elev = samp.map(sm => {
+        let bestLi = 0, bestPerp = Infinity, bestD = 0;
+        for (let li = 0; li < lines.length; li++) {
+          const dd = lines[li].geo.distanceOf(sm.x, sm.y);
+          const p = lines[li].geo.posAt(dd);
+          const perp = (p.x - sm.x) ** 2 + (p.y - sm.y) ** 2;
+          if (perp < bestPerp) { bestPerp = perp; bestLi = li; bestD = dd; }
+        }
+        return elevAt(bestLi, bestD);
+      });
+
       // A longer dwell than the scheduled services — a tour lingers at stations.
-      return { geo, profile: buildProfile(stops, 1.6) };
+      return { geo, profile: buildProfile(stops, 1.6), elev, step: STEP };
     })();
     const tourGeo = tourData.geo;
     const tourProfile = tourData.profile;
     const tourPeriod = tourProfile.total || 1;
-
-    const elevAt = (li: number, d: number): number => {
-      for (const [a, b] of lines[li].ranges) {
-        if (d >= a && d <= b) return UG;
-        if (d >= a - RAMP && d < a) return EL + (UG - EL) * smooth((d - (a - RAMP)) / RAMP);
-        if (d > b && d <= b + RAMP) return UG + (EL - UG) * smooth((d - b) / RAMP);
-      }
-      return EL;
+    // Elevation along the tour loop, interpolated from the per-sample heights
+    // computed in tourData (which read each point's real line elevation, so the
+    // tour dives into the same tunnels the scheduled lines use).
+    const tourElevArr = tourData.elev;
+    const tourStep = tourData.step;
+    const tourElev = (d: number): number => {
+      const total = tourGeo.total, n = tourElevArr.length;
+      const w = ((d % total) + total) % total;
+      const f = w / tourStep;
+      const i0 = Math.floor(f) % n, i1 = (i0 + 1) % n, frac = f - Math.floor(f);
+      return tourElevArr[i0] * (1 - frac) + tourElevArr[i1] * frac;
     };
 
     /* ---------- renderer / scene / camera ---------- */
@@ -574,7 +601,7 @@ export default function MetroMap3D() {
        speed, so it swells pulling away and fades to near-silence braking into
        a station. Built lazily inside a board gesture (autoplay policy). */
     let actx: AudioContext | null = null;
-    let master: GainNode | null = null, rumble: BiquadFilterNode | null = null;
+    let master: GainNode | null = null, rumble: BiquadFilterNode | null = null, clackBuf: AudioBuffer | null = null;
     const ensureAudio = () => {
       if (actx) return;
       try { actx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)(); }
@@ -593,6 +620,11 @@ export default function MetroMap3D() {
       hum.connect(humGain).connect(master);
       master.connect(actx.destination);
       src.start(); hum.start();
+      // short decaying noise burst reused for each rail-joint clack
+      const clen = Math.floor(actx.sampleRate * 0.06);
+      clackBuf = actx.createBuffer(1, clen, actx.sampleRate);
+      const cd = clackBuf.getChannelData(0);
+      for (let i = 0; i < clen; i++) cd[i] = (Math.random() * 2 - 1) * (1 - i / clen);
     };
     const setRumble = (speed: number) => {
       if (!actx || !master || !rumble) return;
@@ -614,15 +646,36 @@ export default function MetroMap3D() {
         o.connect(g).connect(actx!.destination); o.start(t0 + dt); o.stop(t0 + dt + 0.34);
       });
     };
-    // Speed estimate + arrival detection for the ridden train.
+    const clack = (vol: number) => {                 // one rail-joint knock
+      if (!actx || !clackBuf || mutedRef.current) return;
+      const t0 = actx.currentTime;
+      const s = actx.createBufferSource(); s.buffer = clackBuf;
+      const bp = actx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1400; bp.Q.value = 0.9;
+      const g = actx.createGain(); g.gain.value = vol;
+      s.connect(bp).connect(g).connect(actx.destination);
+      s.start(t0); s.stop(t0 + 0.07);
+    };
+    const depart = () => {                            // brief rising two-note as it pulls away
+      if (!actx || mutedRef.current) return;
+      const t0 = actx.currentTime;
+      [[523.25, 0], [698.46, 0.14]].forEach(([f, dt]) => {
+        const o = actx!.createOscillator(), g = actx!.createGain();
+        o.type = 'triangle'; o.frequency.value = f;
+        g.gain.setValueAtTime(0, t0 + dt);
+        g.gain.linearRampToValueAtTime(0.04, t0 + dt + 0.03);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + dt + 0.26);
+        o.connect(g).connect(actx!.destination); o.start(t0 + dt); o.stop(t0 + dt + 0.28);
+      });
+    };
+    // Speed estimate + arrival/clack tracking for the ridden train.
     const rideWorld = new THREE.Vector3();
-    let hadRide = false, lastRideT = 0, wasMoving = false;
+    let hadRide = false, lastRideT = 0, wasMoving = false, clackAccum = 0;
 
     const boardTrain = (rt: TrainRt) => {
       ridden = rt;
       controls.enabled = false;
       camera.fov = 72; camera.updateProjectionMatrix();
-      hadRide = false; wasMoving = false;
+      hadRide = false; wasMoving = false; clackAccum = 0;
       ensureAudio();
       actx?.resume();
       setRiding(true);
@@ -765,9 +818,12 @@ export default function MetroMap3D() {
           const p = tourGeo.posAt(cd);
           const rad = p.angle * Math.PI / 180;
           const nx = Math.sin(rad), nz = -Math.cos(rad);
+          const y = tourElev(cd) + 3.4;
+          // nose down/up the tunnel ramps, from the elevation gradient
+          const pitch = -Math.atan2(tourElev(cd + 3) - tourElev(cd - 3), 6);
           const c = tourTrain.coaches[ci];
-          c.position.set(p.x + nx * TRACK_OFFSET, EL + 3.4, p.y + nz * TRACK_OFFSET);
-          euler.set(0, -rad, 0);
+          c.position.set(p.x + nx * TRACK_OFFSET, y, p.y + nz * TRACK_OFFSET);
+          euler.set(0, -rad, pitch);
           c.setRotationFromEuler(euler);
           if (ridden === tourTrain && ci === 0) {
             const fx = Math.cos(rad), fz = Math.sin(rad);
@@ -775,8 +831,8 @@ export default function MetroMap3D() {
             const arad = ap.angle * Math.PI / 180;
             const anx = Math.sin(arad), anz = -Math.cos(arad);
             rideCap = {
-              camX: p.x + nx * TRACK_OFFSET + fx * 5.6, camY: EL + 3.4 + 2.1, camZ: p.y + nz * TRACK_OFFSET + fz * 5.6,
-              tx: ap.x + anx * TRACK_OFFSET, ty: EL + 3.4 + 1.4, tz: ap.y + anz * TRACK_OFFSET,
+              camX: p.x + nx * TRACK_OFFSET + fx * 5.6, camY: y + 2.1, camZ: p.y + nz * TRACK_OFFSET + fz * 5.6,
+              tx: ap.x + anx * TRACK_OFFSET, ty: tourElev(cd + 70) + 3.4 + 1.4, tz: ap.y + anz * TRACK_OFFSET,
             };
           }
         }
@@ -791,11 +847,16 @@ export default function MetroMap3D() {
           // a fresh stop rings the arrival chime.
           tmpV2.set(rideCap.camX, rideCap.camY, rideCap.camZ);
           if (hadRide) {
-            const speed = rideWorld.distanceTo(tmpV2) / Math.max(1e-3, now - lastRideT);
+            const moved = rideWorld.distanceTo(tmpV2);
+            const speed = moved / Math.max(1e-3, now - lastRideT);
             setRumble(speed);
             const moving = speed > 6;
-            if (wasMoving && !moving) chime();
+            if (wasMoving && !moving) chime();       // braked to a stop
+            if (!wasMoving && moving) depart();       // pulling away
             wasMoving = moving;
+            // rail-joint clacks paced by distance travelled, louder with speed
+            clackAccum += moved;
+            while (clackAccum >= 11) { clackAccum -= 11; clack(0.02 + Math.min(0.05, speed / 42 * 0.05)); }
           }
           rideWorld.copy(tmpV2); lastRideT = now; hadRide = true;
         } else {
