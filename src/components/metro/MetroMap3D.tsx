@@ -14,12 +14,13 @@
    ============================================================ */
 
 import { useEffect, useRef, useState } from 'react';
-import { ArrowCounterClockwise, ArrowLeft, Moon, Sun } from '@phosphor-icons/react';
+import Link from 'next/link';
+import { ArrowCounterClockwise, ArrowLeft, Moon, SpeakerSimpleHigh, SpeakerSimpleSlash, Sun, Train, X } from '@phosphor-icons/react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { lineData, buildStationMap, TUNNELS, MAP_CX, MAP_CY, type Point } from '@/metro/data';
 import { buildGeometry, roundCorners, type Geometry } from '@/metro/geometry';
-import { buildProfile, currentHeadway, poolSize, trainStateAt, returnPhase, turnaroundSlideDelay, BOARD_VIS, COMPRESS, istHour, SERVICE_START, SERVICE_END, isPeak, autoNight, twilightStrength, type Profile } from '@/metro/service';
+import { buildProfile, distAt, currentHeadway, poolSize, trainStateAt, returnPhase, turnaroundSlideDelay, BOARD_VIS, COMPRESS, istHour, SERVICE_START, SERVICE_END, isPeak, autoNight, twilightStrength, type Profile } from '@/metro/service';
 
 const EL = 16;        // viaduct height
 const UG = -14;       // tunnel depth
@@ -27,6 +28,22 @@ const RAMP = 80;      // portal ramp length along the track
 const TRACK_OFFSET = 4;
 const TRACK_W = 2.2;
 const COACH_SPACING = 9.7;
+/** The 24/7 sightseeing service — a distinct amber livery, a station-stopping
+    profile, and a consist modelled FULLY TO SCALE: a real 6-car Namma rake
+    (~132 m) mapped through the measured ~19 m per map-unit, so its length is
+    true relative to the (accurate) station spacing. (The scheduled trains and
+    the scene furniture stay stylized-large for map legibility.) */
+const TOUR_COLOR = '#F5A623';
+const TOUR_MU = 19;                        // metres per map-unit (measured)
+const TOUR_COACHES = 6;
+const TOUR_COACH_LEN = 22 / TOUR_MU;       // ~1.16 u  (real coach ~22 m)
+const TOUR_COACH_W = 2.9 / TOUR_MU;        // ~0.15 u
+const TOUR_COACH_H = 3.7 / TOUR_MU;        // ~0.19 u
+const TOUR_SPACING = 22.6 / TOUR_MU;       // ~1.19 u  (coach + coupling)
+const TOUR_RAIL_Y = 0.15;                  // coach centre sits on the rail
+const TOUR_CAM_FWD = 0.55;                 // camera just ahead of the lead nose
+const TOUR_CAM_UP = 0.8;                   // eye height — clears the stylized parapet walls
+const TOUR_TGT_UP = 0.5;                   // look-ahead target height
 
 const DAY = {
   bg: 0xf7f6f3, ground: 0xffffff, grid: 0xe3e1dc, hemi: 0.95, sun: 0.9,
@@ -53,6 +70,11 @@ export default function MetroMap3D() {
   const [themeMode, setThemeMode] = useState<'auto' | 'day' | 'night'>('auto');
   const applyThemeRef = useRef<(n: boolean) => void>(() => {});
   const resetViewRef = useRef<() => void>(() => {});
+  const exitRideRef = useRef<() => void>(() => {});
+  const boardTourRef = useRef<() => void>(() => {});
+  const [riding, setRiding] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const mutedRef = useRef(false);
   const [svcNow, setSvcNow] = useState<Date | null>(null);
 
   const clockH = svcNow ? istHour(svcNow) : null;
@@ -72,6 +94,8 @@ export default function MetroMap3D() {
     nightRef.current = night;
     applyThemeRef.current(night);
   }, [night]);
+
+  useEffect(() => { mutedRef.current = muted; }, [muted]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -105,6 +129,95 @@ export default function MetroMap3D() {
         if (d > b && d <= b + RAMP) return UG + (EL - UG) * smooth((d - b) / RAMP);
       }
       return EL;
+    };
+
+    // Tour loop — one continuous path threading every line through the shared
+    // interchanges (Majestic, RV Road) so a single train can tour the whole
+    // network. Joins land on shared interchange/terminus coordinates, so the
+    // polyline is continuous; termini become natural turnarounds.
+    const tourData = (() => {
+      const P = lineData[0].points, G = lineData[1].points, Y = lineData[2].points;
+      const seg = (arr: Point[], a: number, b: number): Point[] => {
+        const out: Point[] = [];
+        if (a <= b) for (let i = a; i <= b; i++) out.push(arr[i]);
+        else for (let i = a; i >= b; i--) out.push(arr[i]);
+        return out;
+      };
+      const raw: Point[] = [
+        ...seg(P, 0, 22),   // Whitefield → Majestic
+        ...seg(G, 16, 0),   // Majestic → Madavara
+        ...seg(G, 0, 31),   // Madavara → Silk Institute
+        ...seg(G, 31, 23),  // Silk Institute → RV Road
+        ...seg(Y, 0, 15),   // RV Road → Bommasandra
+        ...seg(Y, 15, 0),   // Bommasandra → RV Road
+        ...seg(G, 23, 16),  // RV Road → Majestic
+        ...seg(P, 22, 36),  // Majestic → Challaghatta
+        ...seg(P, 36, 22),  // Challaghatta → Majestic
+        ...seg(P, 22, 0),   // Majestic → Whitefield
+      ];
+      // drop the duplicate vertex each join repeats, then the wrap-around dup
+      const pts = raw.filter((p, i) => i === 0 || p[0] !== raw[i - 1][0] || p[1] !== raw[i - 1][1]);
+      const f = pts[0], l = pts[pts.length - 1];
+      if (pts.length > 1 && f[0] === l[0] && f[1] === l[1]) pts.pop();
+      const geo = buildGeometry(roundCorners(pts, 18), true);
+
+      // Each dedup'd vertex is a station the tour calls at (a station may recur
+      // when the loop retraces track). Recover its arc-distance by marching a
+      // sampled cursor forward, so repeated visits get distinct, ordered stops.
+      const total = geo.total, STEP = 4;
+      const samp: { d: number; x: number; y: number }[] = [];
+      for (let d = 0; d < total; d += STEP) { const p = geo.posAt(d); samp.push({ d, x: p.x, y: p.y }); }
+      const d2 = (i: number, s: Point) => {
+        const dx = samp[i].x - s[0], dy = samp[i].y - s[1]; return dx * dx + dy * dy;
+      };
+      // For each station in visiting order, march forward to the *local* closest
+      // sample (approach, then recede) — a global min would leap to another pass
+      // of the same track and scramble the ordering.
+      const stops: number[] = [];
+      let si = 0;
+      for (const s of pts) {
+        let k = si, prev = d2(k, s);
+        while (k + 1 < samp.length) {
+          const nd = d2(k + 1, s);
+          if (nd > prev) break;
+          prev = nd; k++;
+        }
+        stops.push(samp[k].d); si = k;
+      }
+      stops[0] = 0;
+      if (stops[stops.length - 1] < total - STEP) stops.push(total); // close the loop
+
+      // Per-sample elevation: project each tour sample onto the nearest real
+      // line and read that line's height, so the tour dips into the very tunnels
+      // (with the same ramps) the scheduled services use.
+      const elev = samp.map(sm => {
+        let bestLi = 0, bestPerp = Infinity, bestD = 0;
+        for (let li = 0; li < lines.length; li++) {
+          const dd = lines[li].geo.distanceOf(sm.x, sm.y);
+          const p = lines[li].geo.posAt(dd);
+          const perp = (p.x - sm.x) ** 2 + (p.y - sm.y) ** 2;
+          if (perp < bestPerp) { bestPerp = perp; bestLi = li; bestD = dd; }
+        }
+        return elevAt(bestLi, bestD);
+      });
+
+      // A longer dwell than the scheduled services — a tour lingers at stations.
+      return { geo, profile: buildProfile(stops, 1.6), elev, step: STEP };
+    })();
+    const tourGeo = tourData.geo;
+    const tourProfile = tourData.profile;
+    const tourPeriod = tourProfile.total || 1;
+    // Elevation along the tour loop, interpolated from the per-sample heights
+    // computed in tourData (which read each point's real line elevation, so the
+    // tour dives into the same tunnels the scheduled lines use).
+    const tourElevArr = tourData.elev;
+    const tourStep = tourData.step;
+    const tourElev = (d: number): number => {
+      const total = tourGeo.total, n = tourElevArr.length;
+      const w = ((d % total) + total) % total;
+      const f = w / tourStep;
+      const i0 = Math.floor(f) % n, i1 = (i0 + 1) % n, frac = f - Math.floor(f);
+      return tourElevArr[i0] * (1 - frac) + tourElevArr[i1] * frac;
     };
 
     /* ---------- renderer / scene / camera ---------- */
@@ -388,7 +501,10 @@ export default function MetroMap3D() {
       color: 0xfff3c4, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false,
     });
 
-    interface TrainRt { group: THREE.Group; coaches: THREE.Object3D[]; light: THREE.Mesh }
+    interface TrainRt { group: THREE.Group; coaches: THREE.Object3D[]; light?: THREE.Mesh }
+    /** Every train group, for click-to-board raycasting (invisible ones are
+        skipped automatically by intersectObjects). */
+    const rideTargets: THREE.Object3D[] = [];
     const bodyMats: { mat: THREE.MeshLambertMaterial; base: THREE.Color }[] = [];
     const windowMats: THREE.MeshLambertMaterial[] = [];
     const cabMats: THREE.MeshLambertMaterial[] = [];
@@ -434,10 +550,174 @@ export default function MetroMap3D() {
         const light = new THREE.Mesh(headlightGeo, headlightMat);
         coaches[0].add(light);
         scene.add(group);
-        return { group, coaches, light };
+        const rt: TrainRt = { group, coaches, light };
+        group.userData.rt = rt;   // walked up to from a raycast hit
+        rideTargets.push(group);
+        return rt;
       };
       return [0, 1].map(() => Array.from({ length: L.pool }, mkTrain));
     });
+
+    /* ---------- the tour train (fully to scale) ----------
+       Amber livery, six real-length coaches. At true scale the coaches are tiny
+       (~1.16 u) so the detailed mainline model is dropped for clean little
+       boxes: silver body, dark window band, amber belt-line + nose cap. */
+    const tourCabMat = new THREE.MeshLambertMaterial({ color: TOUR_COLOR, emissive: new THREE.Color(TOUR_COLOR), emissiveIntensity: 0 });
+    cabMats.push(tourCabMat);
+    const tourBodyGeo = new THREE.BoxGeometry(TOUR_COACH_LEN, TOUR_COACH_H, TOUR_COACH_W);
+    const tourWinGeo = new THREE.BoxGeometry(TOUR_COACH_LEN * 0.8, TOUR_COACH_H * 0.42, TOUR_COACH_W * 1.04);
+    const tourStripeGeo = new THREE.BoxGeometry(TOUR_COACH_LEN * 0.92, TOUR_COACH_H * 0.16, TOUR_COACH_W * 1.06);
+    const tourNoseGeo = new THREE.BoxGeometry(TOUR_COACH_LEN * 0.26, TOUR_COACH_H * 0.94, TOUR_COACH_W * 0.96);
+    const tourTrain: TrainRt = (() => {
+      const group = new THREE.Group();
+      const coaches: THREE.Object3D[] = [];
+      for (let ci = 0; ci < TOUR_COACHES; ci++) {
+        const c = new THREE.Group();
+        const bodyMat = new THREE.MeshLambertMaterial({ color: 0xd0d4da, emissive: new THREE.Color(0xfff4d6), emissiveIntensity: 0 });
+        bodyMats.push({ mat: bodyMat, base: new THREE.Color(0xd0d4da) });
+        c.add(new THREE.Mesh(tourBodyGeo, bodyMat));
+        const winMat = new THREE.MeshLambertMaterial({ color: 0x0e1626, emissive: new THREE.Color(0xfff4d6), emissiveIntensity: 0 });
+        windowMats.push(winMat);
+        const win = new THREE.Mesh(tourWinGeo, winMat); win.position.y = TOUR_COACH_H * 0.08; c.add(win);
+        const stripe = new THREE.Mesh(tourStripeGeo, tourCabMat); stripe.position.y = -TOUR_COACH_H * 0.2; c.add(stripe);
+        if (ci === 0) { const nose = new THREE.Mesh(tourNoseGeo, tourCabMat); nose.position.x = TOUR_COACH_LEN * 0.5; c.add(nose); }
+        coaches.push(c); group.add(c);
+      }
+      scene.add(group);
+      const rt: TrainRt = { group, coaches };
+      group.userData.rt = rt;
+      rideTargets.push(group);
+      return rt;
+    })();
+
+    /* ---------- ride the cab ----------
+       Click a train to ride in its front cab; the camera locks to the lead
+       coach and looks down the line, so it travels the whole route on the
+       schedule — through curves, up/down the tunnel ramps, dwelling at
+       stations. Esc or the Exit button hands control back to the orbit cam. */
+    let ridden: TrainRt | null = null;
+    const lastRidePos = new THREE.Vector3(MAP_CX, EL, MAP_CY);
+    const raycaster = new THREE.Raycaster();
+    const ndc = new THREE.Vector2();
+
+    /* ---------- running sound ----------
+       A synthesized traction rumble (looping brown noise through a low-pass
+       plus a low sine hum), its volume + brightness tracking the train's
+       speed, so it swells pulling away and fades to near-silence braking into
+       a station. Built lazily inside a board gesture (autoplay policy). */
+    let actx: AudioContext | null = null;
+    let master: GainNode | null = null, rumble: BiquadFilterNode | null = null, clackBuf: AudioBuffer | null = null;
+    const ensureAudio = () => {
+      if (actx) return;
+      try { actx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)(); }
+      catch { actx = null; return; }
+      const len = actx.sampleRate * 2;
+      const buf = actx.createBuffer(1, len, actx.sampleRate);
+      const data = buf.getChannelData(0);
+      let last = 0;
+      for (let i = 0; i < len; i++) { const w = Math.random() * 2 - 1; last = (last + 0.02 * w) / 1.02; data[i] = last * 3.5; }
+      const src = actx.createBufferSource(); src.buffer = buf; src.loop = true;
+      rumble = actx.createBiquadFilter(); rumble.type = 'lowpass'; rumble.frequency.value = 200;
+      master = actx.createGain(); master.gain.value = 0;
+      const hum = actx.createOscillator(); hum.type = 'sine'; hum.frequency.value = 54;
+      const humGain = actx.createGain(); humGain.gain.value = 0.45;
+      src.connect(rumble).connect(master);
+      hum.connect(humGain).connect(master);
+      master.connect(actx.destination);
+      src.start(); hum.start();
+      // short decaying noise burst reused for each rail-joint clack
+      const clen = Math.floor(actx.sampleRate * 0.06);
+      clackBuf = actx.createBuffer(1, clen, actx.sampleRate);
+      const cd = clackBuf.getChannelData(0);
+      for (let i = 0; i < clen; i++) cd[i] = (Math.random() * 2 - 1) * (1 - i / clen);
+    };
+    const setRumble = (speed: number) => {
+      if (!actx || !master || !rumble) return;
+      const now = actx.currentTime;
+      if (mutedRef.current || ridden == null) { master.gain.setTargetAtTime(0, now, 0.12); return; }
+      const t = Math.min(1, speed / 42);            // 0 at a standstill, 1 at line speed
+      master.gain.setTargetAtTime(0.02 + t * 0.16, now, 0.09);
+      rumble.frequency.setTargetAtTime(150 + t * 520, now, 0.09);
+    };
+    const chime = () => {                            // soft two-tone arrival
+      if (!actx || mutedRef.current) return;
+      const t0 = actx.currentTime;
+      [[659.25, 0], [523.25, 0.2]].forEach(([f, dt]) => {
+        const o = actx!.createOscillator(), g = actx!.createGain();
+        o.type = 'sine'; o.frequency.value = f;
+        g.gain.setValueAtTime(0, t0 + dt);
+        g.gain.linearRampToValueAtTime(0.05, t0 + dt + 0.03);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + dt + 0.32);
+        o.connect(g).connect(actx!.destination); o.start(t0 + dt); o.stop(t0 + dt + 0.34);
+      });
+    };
+    const clack = (vol: number) => {                 // one rail-joint knock
+      if (!actx || !clackBuf || mutedRef.current) return;
+      const t0 = actx.currentTime;
+      const s = actx.createBufferSource(); s.buffer = clackBuf;
+      const bp = actx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1400; bp.Q.value = 0.9;
+      const g = actx.createGain(); g.gain.value = vol;
+      s.connect(bp).connect(g).connect(actx.destination);
+      s.start(t0); s.stop(t0 + 0.07);
+    };
+    const depart = () => {                            // brief rising two-note as it pulls away
+      if (!actx || mutedRef.current) return;
+      const t0 = actx.currentTime;
+      [[523.25, 0], [698.46, 0.14]].forEach(([f, dt]) => {
+        const o = actx!.createOscillator(), g = actx!.createGain();
+        o.type = 'triangle'; o.frequency.value = f;
+        g.gain.setValueAtTime(0, t0 + dt);
+        g.gain.linearRampToValueAtTime(0.04, t0 + dt + 0.03);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + dt + 0.26);
+        o.connect(g).connect(actx!.destination); o.start(t0 + dt); o.stop(t0 + dt + 0.28);
+      });
+    };
+    // Speed estimate + arrival/clack tracking for the ridden train.
+    const rideWorld = new THREE.Vector3();
+    let hadRide = false, lastRideT = 0, wasMoving = false, clackAccum = 0;
+
+    const boardTrain = (rt: TrainRt) => {
+      ridden = rt;
+      controls.enabled = false;
+      camera.fov = 72; camera.updateProjectionMatrix();
+      hadRide = false; wasMoving = false; clackAccum = 0;
+      ensureAudio();
+      actx?.resume();
+      setRiding(true);
+    };
+    const exitRide = () => {
+      if (!ridden) return;
+      ridden = null;
+      setRumble(0);
+      camera.fov = 50; camera.updateProjectionMatrix();
+      // resume the orbit cam framed on where the ride left off
+      controls.target.copy(lastRidePos);
+      camera.position.set(lastRidePos.x + 160, lastRidePos.y + 130, lastRidePos.z + 160);
+      controls.enabled = true;
+      setRiding(false);
+    };
+    exitRideRef.current = exitRide;
+    boardTourRef.current = () => boardTrain(tourTrain);
+
+    let downX = 0, downY = 0;
+    const onDown = (e: PointerEvent) => { downX = e.clientX; downY = e.clientY; };
+    const onClick = (e: MouseEvent) => {
+      // ignore orbit drags — only a genuine click boards
+      if (Math.hypot(e.clientX - downX, e.clientY - downY) > 6) return;
+      const rect = renderer.domElement.getBoundingClientRect();
+      ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(ndc, camera);
+      const hits = raycaster.intersectObjects(rideTargets, true);
+      if (!hits.length) return;
+      let o: THREE.Object3D | null = hits[0].object;
+      while (o && !o.userData.rt) o = o.parent;
+      if (o && o.userData.rt) boardTrain(o.userData.rt as TrainRt);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') exitRide(); };
+    renderer.domElement.addEventListener('pointerdown', onDown);
+    renderer.domElement.addEventListener('click', onClick);
+    window.addEventListener('keydown', onKey);
 
     /* ---------- theme ---------- */
     const applyTheme = (n: boolean) => {
@@ -460,6 +740,7 @@ export default function MetroMap3D() {
     applyTheme(nightRef.current);
 
     resetViewRef.current = () => {
+      exitRide();
       camera.position.set(MAP_CX + 260, 1050, MAP_CY + 1150);
       controls.target.set(MAP_CX, 0, MAP_CY);
     };
@@ -467,9 +748,14 @@ export default function MetroMap3D() {
     /* ---------- animation ---------- */
     let raf = 0;
     const euler = new THREE.Euler(0, 0, 0, 'YZX');
+    const tmpV = new THREE.Vector3();
+    const tmpV2 = new THREE.Vector3();
     const frame = () => {
       const now = Date.now() / 1000;
       const wallDate = new Date();
+      // Camera pose for the ridden train (cab position + look target), computed
+      // while the lead coach is placed — works for any train, line or tour.
+      let rideCap: { camX: number; camY: number; camZ: number; tx: number; ty: number; tz: number } | null = null;
 
       lines.forEach((L, li) => {
         const headway = currentHeadway(L.cfg, wallDate);
@@ -508,12 +794,84 @@ export default function MetroMap3D() {
               c.position.set(p.x + nx * off, y, p.y + nz * off);
               euler.set(0, -heading, pitch);
               c.setRotationFromEuler(euler);
+              if (ridden && t === ridden && ci === 0) {
+                const fx = Math.cos(heading), fz = Math.sin(heading);
+                const aheadD = cd + (dir ? -1 : 1) * 70;
+                const ap = L.geo.posAtExt(aheadD);
+                const arad = ap.angle * Math.PI / 180 + (dir ? Math.PI : 0);
+                const anx = Math.sin(arad), anz = -Math.cos(arad);
+                rideCap = {
+                  camX: p.x + nx * off + fx * 5.6, camY: y + 2.1, camZ: p.y + nz * off + fz * 5.6,
+                  tx: ap.x + anx * TRACK_OFFSET,
+                  ty: elevAt(li, Math.max(0, Math.min(L.geo.total, aheadD))) + 3.4 + 1.4,
+                  tz: ap.y + anz * TRACK_OFFSET,
+                };
+              }
             }
           }
         }
       });
 
-      controls.update();
+      // Tour train — rides the whole-network loop 24/7 on its own accel/brake +
+      // dwell profile, so it actually stops at every station (and pauses at the
+      // termini it turns back through). No service clock; always rideable.
+      {
+        const tt = ((now % tourPeriod) + tourPeriod) % tourPeriod;
+        const base = distAt(tourProfile, tt) ?? tourProfile.startDist;
+        for (let ci = 0; ci < tourTrain.coaches.length; ci++) {
+          const cd = base - ci * TOUR_SPACING;   // to-scale coaches trail the lead
+          const p = tourGeo.posAt(cd);
+          const rad = p.angle * Math.PI / 180;
+          const nx = Math.sin(rad), nz = -Math.cos(rad);
+          const y = tourElev(cd) + TOUR_RAIL_Y;
+          // nose down/up the tunnel ramps, from the elevation gradient
+          const pitch = -Math.atan2(tourElev(cd + 3) - tourElev(cd - 3), 6);
+          const c = tourTrain.coaches[ci];
+          c.position.set(p.x + nx * TRACK_OFFSET, y, p.y + nz * TRACK_OFFSET);
+          euler.set(0, -rad, pitch);
+          c.setRotationFromEuler(euler);
+          if (ridden === tourTrain && ci === 0) {
+            const fx = Math.cos(rad), fz = Math.sin(rad);
+            const ap = tourGeo.posAt(cd + 70);
+            const arad = ap.angle * Math.PI / 180;
+            const anx = Math.sin(arad), anz = -Math.cos(arad);
+            rideCap = {
+              camX: p.x + nx * TRACK_OFFSET + fx * TOUR_CAM_FWD, camY: tourElev(cd) + TOUR_CAM_UP, camZ: p.y + nz * TRACK_OFFSET + fz * TOUR_CAM_FWD,
+              tx: ap.x + anx * TRACK_OFFSET, ty: tourElev(cd + 70) + TOUR_TGT_UP, tz: ap.y + anz * TRACK_OFFSET,
+            };
+          }
+        }
+      }
+
+      if (ridden) {
+        if (rideCap) {
+          camera.position.lerp(tmpV.set(rideCap.camX, rideCap.camY, rideCap.camZ), 0.5);
+          lastRidePos.copy(tmpV);
+          camera.lookAt(rideCap.tx, rideCap.ty, rideCap.tz);
+          // speed (from the cab target's motion) drives the running sound;
+          // a fresh stop rings the arrival chime.
+          tmpV2.set(rideCap.camX, rideCap.camY, rideCap.camZ);
+          if (hadRide) {
+            const moved = rideWorld.distanceTo(tmpV2);
+            const speed = moved / Math.max(1e-3, now - lastRideT);
+            setRumble(speed);
+            const moving = speed > 6;
+            if (wasMoving && !moving) chime();       // braked to a stop
+            if (!wasMoving && moving) depart();       // pulling away
+            wasMoving = moving;
+            // rail-joint clacks paced by distance travelled, louder with speed
+            clackAccum += moved;
+            while (clackAccum >= 11) { clackAccum -= 11; clack(0.02 + Math.min(0.05, speed / 42 * 0.05)); }
+          }
+          rideWorld.copy(tmpV2); lastRideT = now; hadRide = true;
+        } else {
+          // the ridden train finished its run (faded out) — hand back to orbit
+          exitRide();
+          controls.update();
+        }
+      } else {
+        controls.update();
+      }
       renderer.render(scene, camera);
       raf = requestAnimationFrame(frame);
     };
@@ -529,6 +887,10 @@ export default function MetroMap3D() {
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', onResize);
+      window.removeEventListener('keydown', onKey);
+      renderer.domElement.removeEventListener('pointerdown', onDown);
+      renderer.domElement.removeEventListener('click', onClick);
+      actx?.close();
       controls.dispose();
       renderer.dispose();
       sprites.forEach(sp => { sp.material.map?.dispose(); sp.material.dispose(); });
@@ -552,13 +914,25 @@ export default function MetroMap3D() {
       />
       <div ref={hostRef} className="metro3d-canvas" />
 
-      <a className="m3d-pill m3d-back" href="/">
+      <Link className="m3d-pill m3d-back" href="/">
         <ArrowLeft size={13} weight="bold" />
         2D map
-      </a>
+      </Link>
+
+      {riding ? (
+        <button className="m3d-pill m3d-exit" onClick={() => exitRideRef.current()}>
+          <X size={13} weight="bold" />
+          Exit ride
+        </button>
+      ) : (
+        <button className="m3d-pill m3d-tour" onClick={() => boardTourRef.current()}>
+          <Train size={14} weight="bold" />
+          Ride the tour
+        </button>
+      )}
 
       <div className="m3d-title">
-        <div className="m3d-name">Namma Metro — 3D</div>
+        <div className="m3d-name">{riding ? 'Namma Metro — cab view' : 'Namma Metro — 3D'}</div>
         {h != null && (
           <div className="m3d-status">
             <span className={`svc-dot ${open ? 'on' : 'off'}`} />
@@ -581,9 +955,20 @@ export default function MetroMap3D() {
         <button onClick={() => resetViewRef.current()} title="Reset view">
           <ArrowCounterClockwise size={15} weight="bold" />
         </button>
+        <button
+          onClick={() => setMuted(m => !m)}
+          aria-pressed={muted}
+          title={muted ? 'Unmute train sound' : 'Mute train sound'}
+        >
+          {muted ? <SpeakerSimpleSlash size={15} weight="bold" /> : <SpeakerSimpleHigh size={15} weight="bold" />}
+        </button>
       </div>
 
-      <div className="m3d-hint">Drag to orbit · scroll to zoom · right-drag to pan</div>
+      <div className="m3d-hint">
+        {riding
+          ? 'Riding the cab · Esc or Exit to leave'
+          : 'Click a train to ride · drag to orbit · scroll to zoom'}
+      </div>
     </div>
   );
 }

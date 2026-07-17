@@ -46,6 +46,9 @@
 .m3d-pill:hover { box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 8px 20px rgba(0, 0, 0, 0.1); }
 .m3d-pill:active { transform: scale(0.97); }
 .m3d-back { top: 20px; left: 20px; }
+.m3d-exit, .m3d-tour { top: 20px; left: 50%; transform: translateX(-50%); cursor: pointer; }
+.m3d-exit:active, .m3d-tour:active { transform: translateX(-50%) scale(0.97); }
+.m3d-tour { color: #b26a00; }
 
 .m3d-title {
   position: fixed;
